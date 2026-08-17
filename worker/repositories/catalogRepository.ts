@@ -2,16 +2,10 @@ export type CreateCatalogProduct = {
   businessId: string;
   userId: string;
   name: string;
-  sku: string;
   description: string;
   categoryId: string | null;
   imageId: string | null;
   type: "basic" | "composite";
-  initialStock: number;
-  unitCostCents: number;
-  cashPriceCents: number;
-  cardPriceCents: number;
-  lowStockThreshold: number;
 };
 
 export type StockBatch = {
@@ -29,7 +23,6 @@ export class CatalogRepository {
         p.id, p.sku, p.name, p.description, p.type,
         p.category_id AS categoryId, c.name AS categoryName,
         p.image_id AS imageId, p.is_active AS isActive,
-        p.low_stock_threshold AS lowStockThreshold,
         COALESCE(SUM(CASE WHEN b.deleted_at IS NULL THEN b.warehouse_quantity ELSE 0 END), 0) AS warehouseStock,
         COALESCE(SUM(CASE WHEN b.deleted_at IS NULL THEN b.pos_quantity ELSE 0 END), 0) AS posStock,
         COALESCE(SUM(CASE WHEN b.deleted_at IS NULL THEN b.warehouse_quantity + b.pos_quantity ELSE 0 END), 0) AS currentStock,
@@ -67,30 +60,27 @@ export class CatalogRepository {
 
   async createProduct(input: CreateCatalogProduct) {
     const productId = crypto.randomUUID();
-    const batchId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const statements = [
-      this.db.prepare(`INSERT INTO products
-        (id, business_id, category_id, image_id, sku, name, description, type,
-         sale_price_cents, current_stock, low_stock_threshold)
-        VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, 0, 0, ?)`)
-        .bind(productId, input.businessId, input.categoryId, input.imageId, input.sku,
-          input.name, input.description, input.type, input.lowStockThreshold),
-      this.db.prepare(`INSERT INTO inventory_batches
-        (id, business_id, product_id, initial_quantity, warehouse_quantity, pos_quantity,
-         unit_cost_cents, cash_price_cents, card_price_cents, received_at, created_by_user_id)
-        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`)
-        .bind(batchId, input.businessId, productId, input.initialStock, input.initialStock,
-          input.unitCostCents, input.cashPriceCents, input.cardPriceCents, now, input.userId),
-    ];
-    if (input.initialStock > 0) {
-      statements.push(this.db.prepare(`INSERT INTO inventory_movements
-        (id, business_id, product_id, batch_id, movement_type, quantity, notes, created_by_user_id)
-        VALUES (?, ?, ?, ?, 'inventoryInjection', ?, 'Existencia inicial', ?)`)
-        .bind(crypto.randomUUID(), input.businessId, productId, batchId, input.initialStock, input.userId));
-    }
-    await this.db.batch(statements);
-    return { id: productId, batchId };
+    await this.db.prepare(`INSERT INTO products
+      (id, business_id, category_id, image_id, name, description, type)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(productId, input.businessId, input.categoryId, input.imageId,
+        input.name, input.description, input.type).run();
+    return { id: productId };
+  }
+
+  async updateProduct(businessId: string, id: string, input: Omit<CreateCatalogProduct, "businessId" | "userId">) {
+    const result = await this.db.prepare(`UPDATE products SET category_id = ?, image_id = ?,
+        name = ?, description = ?, type = ?, updated_at = datetime('now')
+      WHERE id = ? AND business_id = ? AND deleted_at IS NULL`)
+      .bind(input.categoryId, input.imageId, input.name, input.description, input.type, id, businessId).run();
+    return Number(result.meta.changes) > 0;
+  }
+
+  async setProductActive(businessId: string, id: string, isActive: boolean) {
+    const result = await this.db.prepare(`UPDATE products SET is_active = ?, updated_at = datetime('now')
+      WHERE id = ? AND business_id = ? AND deleted_at IS NULL`)
+      .bind(isActive ? 1 : 0, id, businessId).run();
+    return Number(result.meta.changes) > 0;
   }
 
   async getBatchesWithWarehouseStock(businessId: string, productId: string): Promise<StockBatch[]> {

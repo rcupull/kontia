@@ -1,75 +1,71 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { AlertTriangle, PackagePlus, Plus, Search } from "lucide-react";
+import { ImagePlus, PackagePlus, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
 import { Field } from "../components/Field";
 import type { Category, Product } from "../types";
 
-function money(cents: number) {
-  return new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(cents / 100);
+async function optimizeProductImage(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
+    (value) => value ? resolve(value) : reject(new Error("No se pudo optimizar la imagen")), "image/webp", 0.75));
+  return new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.webp`, { type: "image/webp" });
 }
 
 export function InventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [query, setQuery] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
-  const [adjusting, setAdjusting] = useState<Product | null>(null);
+  const [editing, setEditing] = useState<Product | null | undefined>();
+  const [image, setImage] = useState<File | null>(null);
+  const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
 
   async function load() {
     const [productResult, categoryResult] = await Promise.all([api.products(), api.categories()]);
-    setProducts(productResult.products);
-    setCategories(categoryResult.categories);
+    setProducts(productResult.products); setCategories(categoryResult.categories);
   }
   useEffect(() => { void load(); }, []);
+  useEffect(() => () => { if (preview.startsWith("blob:")) URL.revokeObjectURL(preview); }, [preview]);
 
   const visible = useMemo(() => products.filter((product) =>
-    `${product.name} ${product.sku ?? ""}`.toLowerCase().includes(query.toLowerCase())), [products, query]);
-  const lowStock = products.filter((product) => product.currentStock <= product.lowStockThreshold).length;
+    `${product.name} ${product.categoryName ?? ""}`.toLowerCase().includes(query.toLowerCase())), [products, query]);
 
-  async function createProduct(event: FormEvent<HTMLFormElement>) {
+  function openForm(product: Product | null) {
+    setError(""); setImage(null); setPreview(product?.imageId ? `/media/${product.imageId}` : ""); setEditing(product);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError("");
     const data = new FormData(event.currentTarget);
     try {
-      await api.createProduct({
-        name: String(data.get("name")), sku: String(data.get("sku")), description: "",
-        categoryId: String(data.get("categoryId") || "") || null,
-        unitCostCents: Math.round(Number(data.get("unitCost")) * 100),
-        cashPriceCents: Math.round(Number(data.get("cashPrice")) * 100),
-        cardPriceCents: Math.round(Number(data.get("cardPrice")) * 100),
-        initialStock: Number(data.get("initialStock")), lowStockThreshold: Number(data.get("lowStockThreshold")),
-      });
-      setShowCreate(false); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "No se pudo crear el producto"); }
+      let imageId = editing?.imageId ?? null;
+      if (image) imageId = (await api.uploadImage(await optimizeProductImage(image))).id;
+      const input = { name: String(data.get("name")), description: "",
+        categoryId: String(data.get("categoryId")) || null, imageId,
+        type: String(data.get("type")) as "basic" | "composite" };
+      if (editing) await api.updateProduct(editing.id, input); else await api.createProduct(input);
+      setEditing(undefined); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "No se pudo guardar el producto"); }
   }
 
-  async function adjust(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!adjusting) return; setError("");
-    const data = new FormData(event.currentTarget);
-    try {
-      await api.adjustStock(adjusting.id, { quantityDelta: Number(data.get("quantityDelta")), reason: String(data.get("reason")) });
-      setAdjusting(null); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "No se pudo ajustar el inventario"); }
-  }
+  async function toggle(product: Product) { await api.setProductActive(product.id, !Boolean(product.isActive)); await load(); }
 
-  return (
-    <section>
-        <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div><p className="text-sm font-black uppercase tracking-wider text-emerald-700">Inventario</p><h1 className="mt-1 text-3xl font-black">Productos y existencias</h1><p className="mt-2 text-slate-500">Registra cada entrada o corrección para mantener un historial confiable.</p></div>
-          <button onClick={() => { setError(""); setShowCreate(true); }} className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 font-black text-white hover:bg-emerald-800"><Plus size={18} /> Nuevo producto</button>
-        </div>
-        <div className="mb-6 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-3xl bg-white p-5 shadow-sm"><p className="text-sm font-bold text-slate-500">Productos activos</p><p className="mt-2 text-3xl font-black">{products.length}</p></div>
-          <div className="rounded-3xl bg-white p-5 shadow-sm"><p className="flex items-center gap-2 text-sm font-bold text-slate-500"><AlertTriangle size={16} /> Requieren atención</p><p className="mt-2 text-3xl font-black text-amber-600">{lowStock}</p></div>
-        </div>
-        <div className="rounded-3xl bg-white shadow-sm">
-          <div className="flex items-center gap-3 border-b border-slate-100 p-4"><Search className="text-slate-400" size={20} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre o SKU" className="w-full bg-transparent py-2 outline-none" /></div>
-          <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left"><thead className="text-xs uppercase tracking-wider text-slate-400"><tr><th className="px-5 py-4">Producto</th><th>Precio</th><th>Existencia</th><th>Estado</th><th></th></tr></thead><tbody>
-            {visible.map((product) => { const low = product.currentStock <= product.lowStockThreshold; return <tr key={product.id} className="border-t border-slate-100"><td className="px-5 py-4"><p className="font-black">{product.name}</p><p className="text-xs text-slate-400">{product.sku || "Sin SKU"}</p></td><td className="font-bold"><p>{money(product.cashPriceCents)} efectivo</p><p className="text-xs text-slate-400">{money(product.cardPriceCents)} tarjeta</p></td><td className="font-black"><p>{product.currentStock}</p><p className="text-xs font-medium text-slate-400">Almacén {product.warehouseStock} · POS {product.posStock}</p></td><td><span className={`rounded-full px-3 py-1 text-xs font-black ${low ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{low ? "Stock bajo" : "Disponible"}</span></td><td className="px-5 text-right"><button onClick={() => { setError(""); setAdjusting(product); }} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-black hover:bg-slate-50">Ajustar</button></td></tr>; })}
-          </tbody></table></div>
-          {visible.length === 0 && <div className="grid place-items-center p-14 text-center text-slate-400"><PackagePlus size={40} /><p className="mt-3 font-bold">No hay productos para mostrar.</p></div>}
-        </div>
-      {(showCreate || adjusting) && <div className="fixed inset-0 z-20 grid place-items-center bg-slate-950/40 p-4"><form onSubmit={showCreate ? createProduct : adjust} className="w-full max-w-lg rounded-[2rem] bg-white p-7 shadow-2xl"><h2 className="text-2xl font-black">{showCreate ? "Nuevo producto y lote inicial" : `Ajustar ${adjusting?.name}`}</h2><div className="mt-6 grid gap-4">{showCreate ? <><Field label="Nombre" name="name" required /><Field label="SKU (opcional)" name="sku" /><label className="grid gap-2 text-sm font-bold text-slate-700">Categoría<select name="categoryId" className="rounded-2xl border border-slate-200 bg-white px-4 py-3"><option value="">Sin categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><Field label="Costo unitario" name="unitCost" type="number" min="0" step="0.01" required /><Field label="Existencia inicial en almacén" name="initialStock" type="number" min="0" step="0.01" required /></div><div className="grid grid-cols-2 gap-3"><Field label="Precio efectivo" name="cashPrice" type="number" min="0" step="0.01" required /><Field label="Precio tarjeta" name="cardPrice" type="number" min="0" step="0.01" required /></div><Field label="Avisar cuando quede" name="lowStockThreshold" type="number" min="0" step="0.01" required /></> : <><Field label="Cantidad (+ entrada, − salida de almacén)" name="quantityDelta" type="number" step="0.01" required /><Field label="Motivo del ajuste" name="reason" minLength={3} required /></>}</div>{error && <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p>}<div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => { setShowCreate(false); setAdjusting(null); }} className="rounded-xl px-4 py-2 font-black text-slate-500">Cancelar</button><button className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white">Guardar</button></div></form></div>}
-    </section>
-  );
+  return <section>
+    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-sm font-black uppercase tracking-wider text-emerald-700">Catálogo</p><h1 className="mt-1 text-3xl font-black">Productos</h1><p className="mt-2 text-slate-500">El catálogo no almacena precios ni existencias; ambos provienen de sus lotes.</p></div><button disabled={categories.length === 0} onClick={() => openForm(null)} className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 font-black text-white disabled:opacity-40"><Plus size={18} /> Nuevo producto</button></div>
+    {categories.length === 0 && <p className="mt-5 rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-800">Primero registra una categoría.</p>}
+    <div className="mt-6 rounded-3xl bg-white shadow-sm"><div className="flex items-center gap-3 border-b border-slate-100 p-4"><Search size={20} className="text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar producto o categoría" className="w-full bg-transparent py-2 outline-none" /></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead className="text-xs uppercase tracking-wider text-slate-400"><tr><th className="px-5 py-4">Producto</th><th>Tipo</th><th>Stocks derivados</th><th>Estado</th><th></th></tr></thead><tbody>{visible.map((product) => <tr key={product.id} className="border-t border-slate-100"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl bg-slate-100">{product.imageId ? <img src={`/media/${product.imageId}`} alt="" className="h-full w-full object-cover" /> : <PackagePlus className="text-slate-400" />}</div><div><p className="font-black">{product.name}</p><p className="text-xs text-slate-400">{product.categoryName || "Sin categoría"}</p></div></div></td><td><span className={`rounded-full px-3 py-1 text-xs font-black ${product.type === "composite" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>{product.type === "composite" ? "Compuesto" : "Básico"}</span></td><td><p className="font-bold">Almacén {product.warehouseStock}</p><p className="text-xs text-slate-400">POS {product.posStock}</p></td><td><button onClick={() => void toggle(product)} className={`rounded-full px-3 py-1 text-xs font-black ${product.isActive ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{product.isActive ? "Activo" : "Inactivo"}</button></td><td className="px-5 text-right"><button onClick={() => openForm(product)} className="rounded-xl border border-slate-200 p-2 hover:bg-slate-50"><Pencil size={16} /></button></td></tr>)}</tbody></table></div>
+      {visible.length === 0 && <div className="grid place-items-center p-14 text-slate-400"><PackagePlus size={40} /><p className="mt-3 font-bold">No hay productos para mostrar.</p></div>}
+    </div>
+    {editing !== undefined && <div className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-slate-950/45 p-4"><form onSubmit={submit} className="my-8 w-full max-w-lg rounded-[2rem] bg-white p-7 shadow-2xl"><div className="flex justify-between"><div><h2 className="text-2xl font-black">{editing ? "Editar producto" : "Nuevo producto"}</h2><p className="mt-1 text-sm text-slate-500">Los precios y cantidades se registran desde Inventario.</p></div><button type="button" onClick={() => setEditing(undefined)}><X /></button></div>
+      <div className="mt-6 grid gap-4"><Field label="Nombre" name="name" defaultValue={editing?.name} required /><label className="grid gap-2 text-sm font-bold text-slate-700">Tipo<select name="type" defaultValue={editing?.type ?? "basic"} required className="rounded-2xl border border-slate-200 bg-white px-4 py-3"><option value="basic">Básico</option><option value="composite">Compuesto</option></select></label><label className="grid gap-2 text-sm font-bold text-slate-700">Categoría<select name="categoryId" defaultValue={editing?.categoryId ?? ""} required className="rounded-2xl border border-slate-200 bg-white px-4 py-3"><option value="" disabled>Selecciona la categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+      <div><p className="mb-2 text-sm font-bold text-slate-700">Imagen</p><label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm font-bold text-slate-500"><ImagePlus size={18} /> Subir imagen<input type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; setImage(file); if (file) setPreview(URL.createObjectURL(file)); }} /></label>{preview && <img src={preview} alt="Vista previa" className="mt-3 h-32 w-32 rounded-2xl object-cover" />}</div></div>
+      {error && <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p>}<div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setEditing(undefined)} className="px-4 font-black text-slate-500">Cancelar</button><button className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white">Guardar</button></div></form></div>}
+  </section>;
 }

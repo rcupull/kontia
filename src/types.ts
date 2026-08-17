@@ -10,12 +10,15 @@ export type Product = {
   sku: string | null;
   name: string;
   description: string;
+  type: "basic" | "composite";
+  categoryId: string | null;
+  categoryName: string | null;
+  imageId: string | null;
   cashPriceCents: number;
   cardPriceCents: number;
   warehouseStock: number;
   posStock: number;
   currentStock: number;
-  lowStockThreshold: number;
   isActive: number;
 };
 

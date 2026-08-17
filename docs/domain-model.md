@@ -57,9 +57,10 @@ atómica que crea el movimiento.
 - merma y ajuste negativo: restan de su ubicación correspondiente;
 - transferencia al almacén: resta POS y suma almacén.
 
-Las columnas antiguas `products.sale_price_cents` y `products.current_stock`
-quedan únicamente para permitir la migración desde el prototipo. La API no debe
-usarlas después de `0003_litepos_domain.sql`.
+Las columnas antiguas `products.sale_price_cents`, `products.current_stock` y
+`products.low_stock_threshold` se utilizan solamente durante la conversión del
+prototipo y se eliminan en `0004_products_catalog_only.sql`. La API no consulta
+ni escribe cantidades, costos o precios en `products`.
 
 ## Diferencias deliberadas
 

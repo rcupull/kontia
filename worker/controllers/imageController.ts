@@ -10,7 +10,9 @@ export async function getImage(c: Context<{ Bindings: Bindings }>) {
   if (!key) return c.notFound();
   const image = await new ImageRepository(c.env.DB).find(key);
   if (!image) return c.notFound();
-  const bytes = Uint8Array.from(image.data);
+  const bytes = image.data instanceof ArrayBuffer
+    ? new Uint8Array(image.data)
+    : Uint8Array.from(image.data);
   if (bytes.byteLength !== image.size_bytes) return c.json({ error: "La imagen almacenada no es válida" }, 500);
   return new Response(bytes.buffer, { headers: {
     "Content-Type": image.content_type,

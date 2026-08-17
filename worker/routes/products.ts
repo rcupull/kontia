@@ -8,16 +8,10 @@ export const productRoutes = new Hono<{ Bindings: Bindings; Variables: Variables
 
 const productInput = z.object({
   name: z.string().trim().min(2).max(120),
-  sku: z.string().trim().max(50).optional().default(""),
   description: z.string().trim().max(500).optional().default(""),
   categoryId: z.string().uuid().nullable().optional().default(null),
   imageId: z.string().uuid().nullable().optional().default(null),
   type: z.enum(["basic", "composite"]).default("basic"),
-  unitCostCents: z.number().int().min(0).default(0),
-  cashPriceCents: z.number().int().min(0),
-  cardPriceCents: z.number().int().min(0),
-  initialStock: z.number().min(0).default(0),
-  lowStockThreshold: z.number().min(0).default(0),
 });
 
 productRoutes.get("/", async (c) => {
@@ -31,6 +25,18 @@ productRoutes.post("/", zValidator("json", productInput), async (c) => {
     ...c.req.valid("json"), businessId: user.businessId, userId: user.id,
   });
   return c.json(result, 201);
+});
+
+productRoutes.put("/:id", zValidator("json", productInput), async (c) => {
+  const user = c.get("sessionUser");
+  const updated = await new CatalogRepository(c.env.DB).updateProduct(user.businessId, c.req.param("id"), c.req.valid("json"));
+  return updated ? c.json({ ok: true }) : c.json({ error: "Producto no encontrado" }, 404);
+});
+
+productRoutes.patch("/:id/status", zValidator("json", z.object({ isActive: z.boolean() })), async (c) => {
+  const updated = await new CatalogRepository(c.env.DB).setProductActive(c.get("sessionUser").businessId,
+    c.req.param("id"), c.req.valid("json").isActive);
+  return updated ? c.json({ ok: true }) : c.json({ error: "Producto no encontrado" }, 404);
 });
 
 productRoutes.post("/:id/stock-adjustments", zValidator("json", z.object({

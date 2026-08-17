@@ -21,8 +21,18 @@ export const api = {
   products: () => request<{ products: Product[] }>("/api/products"),
   categories: () => request<{ categories: Category[] }>("/api/categories"),
   createCategory: (name: string) => request<{ category: Category }>("/api/categories", { method: "POST", body: JSON.stringify({ name }) }),
-  createProduct: (input: { name: string; sku: string; description: string; categoryId: string | null; unitCostCents: number; cashPriceCents: number; cardPriceCents: number; lowStockThreshold: number; initialStock: number }) =>
+  createProduct: (input: { name: string; description: string; categoryId: string | null; imageId: string | null; type: "basic" | "composite" }) =>
     request<{ id: string }>("/api/products", { method: "POST", body: JSON.stringify(input) }),
+  updateProduct: (id: string, input: { name: string; description: string; categoryId: string | null; imageId: string | null; type: "basic" | "composite" }) =>
+    request<{ ok: boolean }>(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  setProductActive: (id: string, isActive: boolean) => request<{ ok: boolean }>(`/api/products/${id}/status`, { method: "PATCH", body: JSON.stringify({ isActive }) }),
+  uploadImage: async (file: File) => {
+    const body = new FormData(); body.set("file", file);
+    const response = await fetch("/api/images", { method: "POST", body });
+    const result = await response.json() as { id?: string; imageUrl?: string; error?: string };
+    if (!response.ok || !result.id) throw new Error(result.error ?? "No se pudo subir la imagen");
+    return result as { id: string; imageUrl: string };
+  },
   adjustStock: (id: string, input: { quantityDelta: number; reason: string }) =>
     request<{ ok: boolean }>(`/api/products/${id}/stock-adjustments`, { method: "POST", body: JSON.stringify(input) }),
   suppliers: (search = "") => request<{ suppliers: Supplier[] }>(`/api/suppliers?search=${encodeURIComponent(search)}`),

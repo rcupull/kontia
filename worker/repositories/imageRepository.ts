@@ -2,7 +2,7 @@ export type ImageRow = {
   id: string;
   business_id: string;
   content_type: string;
-  data: number[];
+  data: number[] | ArrayBuffer;
   size_bytes: number;
 };
 
