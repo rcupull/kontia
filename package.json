@@ -17,8 +17,11 @@
   "dependencies": {
     "@cloudflare/vite-plugin": "1.44.0",
     "@hono/zod-validator": "0.8.0",
+    "@radix-ui/react-popover": "1.1.23",
+    "classnames": "2.5.1",
     "hono": "4.12.30",
     "lucide-react": "1.24.0",
+    "react-hook-form": "7.83.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-router-dom": "7.18.1",
