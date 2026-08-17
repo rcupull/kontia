@@ -1,4 +1,4 @@
-import type { Product, SessionUser } from "./types";
+import type { Category, Product, SessionUser, Supplier, SupplierInvoice } from "./types";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -19,8 +19,16 @@ export const api = {
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   session: () => request<{ user: SessionUser | null }>("/api/auth/session"),
   products: () => request<{ products: Product[] }>("/api/products"),
-  createProduct: (input: { name: string; sku: string; description: string; salePriceCents: number; lowStockThreshold: number; initialStock: number }) =>
+  categories: () => request<{ categories: Category[] }>("/api/categories"),
+  createCategory: (name: string) => request<{ category: Category }>("/api/categories", { method: "POST", body: JSON.stringify({ name }) }),
+  createProduct: (input: { name: string; sku: string; description: string; categoryId: string | null; unitCostCents: number; cashPriceCents: number; cardPriceCents: number; lowStockThreshold: number; initialStock: number }) =>
     request<{ id: string }>("/api/products", { method: "POST", body: JSON.stringify(input) }),
   adjustStock: (id: string, input: { quantityDelta: number; reason: string }) =>
-    request<{ currentStock: number }>(`/api/products/${id}/stock-adjustments`, { method: "POST", body: JSON.stringify(input) }),
+    request<{ ok: boolean }>(`/api/products/${id}/stock-adjustments`, { method: "POST", body: JSON.stringify(input) }),
+  suppliers: (search = "") => request<{ suppliers: Supplier[] }>(`/api/suppliers?search=${encodeURIComponent(search)}`),
+  createSupplier: (input: Omit<Supplier, "id">) => request<{ id: string }>("/api/suppliers", { method: "POST", body: JSON.stringify(input) }),
+  updateSupplier: (id: string, input: Omit<Supplier, "id">) => request<{ ok: boolean }>(`/api/suppliers/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  supplierInvoices: (search = "") => request<{ invoices: SupplierInvoice[] }>(`/api/supplier-invoices?search=${encodeURIComponent(search)}`),
+  createSupplierInvoice: (input: { supplierId: string; invoiceNumber: string; invoiceDate: string; totalAmountCents: number; notes?: string }) =>
+    request<{ id: string }>("/api/supplier-invoices", { method: "POST", body: JSON.stringify(input) }),
 };

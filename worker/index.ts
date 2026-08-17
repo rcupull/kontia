@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { authRoutes } from "./routes/auth";
 import { productRoutes } from "./routes/products";
 import { categoryRoutes } from "./routes/categories";
+import { supplierRoutes } from "./routes/suppliers";
+import { supplierInvoiceRoutes } from "./routes/supplierInvoices";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -16,11 +18,14 @@ app.onError((error, c) => {
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.route("/api/auth", authRoutes);
 app.get("/media/:key", getImage);
-app.use("/api/products*", requireSession);
-app.use("/api/categories*", requireSession);
-app.use("/api/images*", requireSession);
+for (const resource of ["products", "categories", "images", "suppliers", "supplier-invoices"]) {
+  app.use(`/api/${resource}`, requireSession);
+  app.use(`/api/${resource}/*`, requireSession);
+}
 app.route("/api/products", productRoutes);
 app.route("/api/categories", categoryRoutes);
 app.post("/api/images", uploadImage);
+app.route("/api/suppliers", supplierRoutes);
+app.route("/api/supplier-invoices", supplierInvoiceRoutes);
 
 export default app;
