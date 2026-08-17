@@ -1,0 +1,38 @@
+{
+  "name": "kontia",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "deploy": "npm run build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply kontia-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply kontia-db --remote",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@cloudflare/vite-plugin": "1.44.0",
+    "@hono/zod-validator": "0.8.0",
+    "hono": "4.12.30",
+    "lucide-react": "1.24.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router-dom": "7.18.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260714.1",
+    "@tailwindcss/vite": "4.3.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "tailwindcss": "4.3.2",
+    "typescript": "7.0.2",
+    "vite": "8.1.4",
+    "wrangler": "4.110.0"
+  }
+}
