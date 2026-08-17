@@ -4,6 +4,7 @@ import { AdminLayout } from "./components/AdminLayout";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { AuthPage } from "./pages/AuthPage";
 import { InventoryPage } from "./pages/InventoryPage";
+import { InventoryAdminPage } from "./pages/InventoryAdminPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { SupplierInvoicesPage } from "./pages/SupplierInvoicesPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
@@ -21,8 +22,7 @@ export default function App() {
       <Route path="compositions" element={<PlaceholderPage title="Composiciones" description="Productos compuestos, producción y desarme de combos." />} />
       <Route path="suppliers" element={<SuppliersPage />} />
       <Route path="supplier-invoices" element={<SupplierInvoicesPage />} />
-      <Route path="inventory-batches" element={<PlaceholderPage title="Lotes de inventario" description="Costos, precios y existencias por lote y ubicación." />} />
-      <Route path="inventory-movements" element={<PlaceholderPage title="Movimientos de inventario" description="Entradas, salidas, transferencias, mermas y ajustes auditables." />} />
+      <Route path="inventory" element={<InventoryAdminPage />} />
       <Route path="orders" element={<PlaceholderPage title="Ventas" description="Historial de órdenes, detalles y devoluciones." />} />
       <Route path="cash-sessions" element={<PlaceholderPage title="Sesiones de caja" description="Aperturas, cierres, arqueos y diferencias de caja." />} />
       <Route path="operating-expenses" element={<PlaceholderPage title="Gastos operativos" description="Salarios, servicios, transporte y demás gastos del negocio." />} />

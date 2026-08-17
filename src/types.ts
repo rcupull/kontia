@@ -33,3 +33,11 @@ export type SupplierInvoice = {
 };
 
 export type Category = { id: string; name: string; createdAt: string; updatedAt: string };
+
+export type InventoryBatch = { id: string; productId: string; productName: string;
+  supplierInvoiceId?: string; invoiceNumber?: string; supplierName?: string;
+  initialQuantity: number; warehouseQuantity: number; posQuantity: number;
+  unitCostCents: number; cashPriceCents: number; cardPriceCents: number; receivedAt: string };
+export type InventoryMovement = { id: string; productId: string; productName: string; batchId: string;
+  movementType: string; quantity: number; notes?: string; createdAt: string;
+  currentWarehouseQuantity: number; currentPosQuantity: number };

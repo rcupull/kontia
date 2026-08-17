@@ -4,6 +4,7 @@ import { productRoutes } from "./routes/products";
 import { categoryRoutes } from "./routes/categories";
 import { supplierRoutes } from "./routes/suppliers";
 import { supplierInvoiceRoutes } from "./routes/supplierInvoices";
+import { inventoryRoutes } from "./routes/inventory";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -18,7 +19,7 @@ app.onError((error, c) => {
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.route("/api/auth", authRoutes);
 app.get("/media/:key", getImage);
-for (const resource of ["products", "categories", "images", "suppliers", "supplier-invoices"]) {
+for (const resource of ["products", "categories", "images", "suppliers", "supplier-invoices", "inventory"]) {
   app.use(`/api/${resource}`, requireSession);
   app.use(`/api/${resource}/*`, requireSession);
 }
@@ -27,5 +28,6 @@ app.route("/api/categories", categoryRoutes);
 app.post("/api/images", uploadImage);
 app.route("/api/suppliers", supplierRoutes);
 app.route("/api/supplier-invoices", supplierInvoiceRoutes);
+app.route("/api/inventory", inventoryRoutes);
 
 export default app;

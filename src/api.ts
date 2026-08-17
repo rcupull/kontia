@@ -1,4 +1,4 @@
-import type { Category, Product, SessionUser, Supplier, SupplierInvoice } from "./types";
+import type { Category, InventoryBatch, InventoryMovement, Product, SessionUser, Supplier, SupplierInvoice } from "./types";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -41,4 +41,9 @@ export const api = {
   supplierInvoices: (search = "") => request<{ invoices: SupplierInvoice[] }>(`/api/supplier-invoices?search=${encodeURIComponent(search)}`),
   createSupplierInvoice: (input: { supplierId: string; invoiceNumber: string; invoiceDate: string; totalAmountCents: number; notes?: string }) =>
     request<{ id: string }>("/api/supplier-invoices", { method: "POST", body: JSON.stringify(input) }),
+  inventoryBatches: (search = "") => request<{ batches: InventoryBatch[] }>(`/api/inventory/batches?search=${encodeURIComponent(search)}`),
+  inventoryMovements: (search = "") => request<{ movements: InventoryMovement[] }>(`/api/inventory/movements?search=${encodeURIComponent(search)}`),
+  createInventoryMovement: (input: { productId: string; batchId?: string; movementType: string; quantity: number;
+    unitCostCents?: number; cashPriceCents?: number; cardPriceCents?: number; supplierInvoiceId?: string; notes?: string }) =>
+    request<{ id: string; batchId: string }>("/api/inventory/movements", { method: "POST", body: JSON.stringify(input) }),
 };
