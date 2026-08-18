@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { BarChart3, Boxes, Building2, ChevronLeft, CircleDollarSign, ClipboardList,
   FileText, LayoutDashboard, LogOut, Menu, PackageOpen, Receipt, Settings, ShoppingCart,
-  Store, Tags, Users, WalletCards, Warehouse, Wrench, X } from "lucide-react";
+  Store, Tags, Users, WalletCards, Warehouse, Wrench, X, MapPin } from "lucide-react";
 import { useAuth } from "../auth";
 import { api } from "../api";
 
@@ -14,6 +14,7 @@ const sections = [
   { to: "/admin/suppliers", label: "Proveedores", icon: Building2 },
   { to: "/admin/supplier-invoices", label: "Facturas", icon: FileText },
   { to: "/admin/inventory", label: "Inventario", icon: Warehouse },
+  { to: "/admin/locations", label: "Ubicaciones", icon: MapPin },
   { to: "/admin/orders", label: "Ventas", icon: Receipt },
   { to: "/admin/cash-sessions", label: "Sesiones de caja", icon: WalletCards },
   { to: "/admin/operating-expenses", label: "Gastos", icon: CircleDollarSign },

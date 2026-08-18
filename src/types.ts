@@ -33,11 +33,13 @@ export type SupplierInvoice = {
 };
 
 export type Category = { id: string; name: string; createdAt: string; updatedAt: string };
+export type Location = { id:string;code:string;name:string;type:"warehouse"|"point_of_sale";address?:string;isActive:number;totalUnits:number };
+export type LocationStock = { locationId:string;locationName:string;locationType:"warehouse"|"point_of_sale";quantity:number };
 
 export type InventoryBatch = { id: string; productId: string; productName: string;
   supplierInvoiceId?: string; invoiceNumber?: string; supplierName?: string;
-  initialQuantity: number; warehouseQuantity: number; posQuantity: number;
+  initialQuantity: number; totalQuantity:number; locationStocks:LocationStock[];
   unitCostCents: number; cashPriceCents: number; cardPriceCents: number; receivedAt: string };
 export type InventoryMovement = { id: string; productId: string; productName: string; batchId: string;
   movementType: string; quantity: number; notes?: string; createdAt: string;
-  currentWarehouseQuantity: number; currentPosQuantity: number };
+  sourceLocationId?:string;sourceLocationName?:string;destinationLocationId?:string;destinationLocationName?:string };

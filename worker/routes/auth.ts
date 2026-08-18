@@ -29,6 +29,8 @@ authRoutes.post(
 
     const businessId = crypto.randomUUID();
     const userId = crypto.randomUUID();
+    const warehouseId = crypto.randomUUID();
+    const pointOfSaleId = crypto.randomUUID();
     const password = await hashPassword(input.password);
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT INTO businesses (id, name) VALUES (?, ?)").bind(businessId, input.businessName),
@@ -36,6 +38,10 @@ authRoutes.post(
         (id, business_id, username, display_name, password_hash, password_salt, role)
         VALUES (?, ?, ?, ?, ?, ?, 'owner')`)
         .bind(userId, businessId, input.username, input.displayName, password.hash, password.salt),
+      c.env.DB.prepare(`INSERT INTO locations (id,business_id,code,name,type) VALUES (?,?,'ALM-01','Almacén principal','warehouse')`)
+        .bind(warehouseId,businessId),
+      c.env.DB.prepare(`INSERT INTO locations (id,business_id,code,name,type) VALUES (?,?,'POS-01','Punto de venta principal','point_of_sale')`)
+        .bind(pointOfSaleId,businessId),
     ]);
     const user = { id: userId, businessId, displayName: input.displayName, role: "owner" as const };
     await createSession(c, user);

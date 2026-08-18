@@ -46,7 +46,13 @@ async function readSession(c: Context<{ Bindings: Bindings; Variables: Variables
   try {
     const json = atob(payload.replaceAll("-", "+").replaceAll("_", "/"));
     const data = JSON.parse(json) as SessionUser & { exp: number };
-    return data.exp > Date.now() / 1000 ? data : null;
+    if (data.exp <= Date.now() / 1000) return null;
+    const user = await c.env.DB.prepare(`SELECT u.id,u.business_id AS businessId,
+        u.display_name AS displayName,u.role
+      FROM users u JOIN businesses b ON b.id=u.business_id
+      WHERE u.id=? AND u.business_id=? AND u.is_active=1 AND b.is_active=1`)
+      .bind(data.id,data.businessId).first<SessionUser>();
+    return user ?? null;
   } catch {
     return null;
   }

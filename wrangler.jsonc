@@ -1,20 +1,27 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "kontia",
-  "main": "worker/index.ts",
-  "compatibility_date": "2026-07-15",
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
-  "assets": {
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/media/*"]
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "kontia-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
-      "migrations_dir": "migrations"
-    }
-  ]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "kontia",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-07-15",
+	"workers_dev": true,
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	},
+	"assets": {
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api/*",
+			"/media/*"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "kontia-db",
+			"database_id": "44e615d0-af2d-4bce-aaca-1efe15f51aa6",
+			"migrations_dir": "migrations"
+		}
+	]
 }

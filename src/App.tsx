@@ -8,6 +8,7 @@ import { InventoryAdminPage } from "./pages/InventoryAdminPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { SupplierInvoicesPage } from "./pages/SupplierInvoicesPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
+import { LocationsPage } from "./pages/LocationsPage";
 
 export default function App() {
   const { loading, user } = useAuth();
@@ -23,6 +24,7 @@ export default function App() {
       <Route path="suppliers" element={<SuppliersPage />} />
       <Route path="supplier-invoices" element={<SupplierInvoicesPage />} />
       <Route path="inventory" element={<InventoryAdminPage />} />
+      <Route path="locations" element={<LocationsPage />} />
       <Route path="orders" element={<PlaceholderPage title="Ventas" description="Historial de órdenes, detalles y devoluciones." />} />
       <Route path="cash-sessions" element={<PlaceholderPage title="Sesiones de caja" description="Aperturas, cierres, arqueos y diferencias de caja." />} />
       <Route path="operating-expenses" element={<PlaceholderPage title="Gastos operativos" description="Salarios, servicios, transporte y demás gastos del negocio." />} />

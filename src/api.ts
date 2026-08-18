@@ -1,4 +1,4 @@
-import type { Category, InventoryBatch, InventoryMovement, Product, SessionUser, Supplier, SupplierInvoice } from "./types";
+import type { Category, InventoryBatch, InventoryMovement, Location, Product, SessionUser, Supplier, SupplierInvoice } from "./types";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -33,7 +33,7 @@ export const api = {
     if (!response.ok || !result.id) throw new Error(result.error ?? "No se pudo subir la imagen");
     return result as { id: string; imageUrl: string };
   },
-  adjustStock: (id: string, input: { quantityDelta: number; reason: string }) =>
+  adjustStock: (id: string, input: { locationId:string; quantityDelta: number; reason: string }) =>
     request<{ ok: boolean }>(`/api/products/${id}/stock-adjustments`, { method: "POST", body: JSON.stringify(input) }),
   suppliers: (search = "") => request<{ suppliers: Supplier[] }>(`/api/suppliers?search=${encodeURIComponent(search)}`),
   createSupplier: (input: Omit<Supplier, "id">) => request<{ id: string }>("/api/suppliers", { method: "POST", body: JSON.stringify(input) }),
@@ -44,6 +44,10 @@ export const api = {
   inventoryBatches: (search = "") => request<{ batches: InventoryBatch[] }>(`/api/inventory/batches?search=${encodeURIComponent(search)}`),
   inventoryMovements: (search = "") => request<{ movements: InventoryMovement[] }>(`/api/inventory/movements?search=${encodeURIComponent(search)}`),
   createInventoryMovement: (input: { productId: string; batchId?: string; movementType: string; quantity: number;
-    unitCostCents?: number; cashPriceCents?: number; cardPriceCents?: number; supplierInvoiceId?: string; notes?: string }) =>
+    sourceLocationId?:string;destinationLocationId?:string;unitCostCents?: number; cashPriceCents?: number; cardPriceCents?: number; supplierInvoiceId?: string; notes?: string }) =>
     request<{ id: string; batchId: string }>("/api/inventory/movements", { method: "POST", body: JSON.stringify(input) }),
+  locations: (search="") => request<{locations:Location[]}>(`/api/locations?search=${encodeURIComponent(search)}`),
+  createLocation: (input:{code:string;name:string;type:Location["type"];address?:string}) => request<{id:string}>("/api/locations",{method:"POST",body:JSON.stringify(input)}),
+  updateLocation: (id:string,input:{code:string;name:string;type:Location["type"];address?:string}) => request<{ok:boolean}>(`/api/locations/${id}`,{method:"PUT",body:JSON.stringify(input)}),
+  setLocationActive: (id:string,isActive:boolean) => request<{ok:boolean}>(`/api/locations/${id}/status`,{method:"PATCH",body:JSON.stringify({isActive})}),
 };

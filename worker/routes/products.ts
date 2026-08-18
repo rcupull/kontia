@@ -40,6 +40,7 @@ productRoutes.patch("/:id/status", zValidator("json", z.object({ isActive: z.boo
 });
 
 productRoutes.post("/:id/stock-adjustments", zValidator("json", z.object({
+  locationId: z.string().uuid(),
   quantityDelta: z.number().refine((value) => value !== 0),
   reason: z.string().trim().min(3).max(240),
 })), async (c) => {
