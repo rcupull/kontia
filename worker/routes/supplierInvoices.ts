@@ -19,3 +19,14 @@ supplierInvoiceRoutes.post("/", zValidator("json", input), async (c) => {
     throw error;
   }
 });
+supplierInvoiceRoutes.put("/:id", zValidator("json", input), async (c) => {
+  try {
+    const updated = await new SupplierInvoiceRepository(c.env.DB).update(
+      c.get("sessionUser").businessId, c.req.param("id"), c.req.valid("json"),
+    );
+    return updated ? c.json({ ok: true }) : c.json({ error: "Factura no encontrada" }, 404);
+  } catch (error) {
+    if (error instanceof Error && error.message === "SUPPLIER_NOT_FOUND") return c.json({ error: "Proveedor no encontrado" }, 404);
+    throw error;
+  }
+});

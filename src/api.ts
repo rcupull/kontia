@@ -41,6 +41,8 @@ export const api = {
   supplierInvoices: (search = "") => request<{ invoices: SupplierInvoice[] }>(`/api/supplier-invoices?search=${encodeURIComponent(search)}`),
   createSupplierInvoice: (input: { supplierId: string; invoiceNumber: string; invoiceDate: string; totalAmountCents: number; notes?: string }) =>
     request<{ id: string }>("/api/supplier-invoices", { method: "POST", body: JSON.stringify(input) }),
+  updateSupplierInvoice: (id: string, input: { supplierId: string; invoiceNumber: string; invoiceDate: string; totalAmountCents: number; notes?: string }) =>
+    request<{ ok: boolean }>(`/api/supplier-invoices/${id}`, { method: "PUT", body: JSON.stringify(input) }),
   inventoryBatches: (search = "") => request<{ batches: InventoryBatch[] }>(`/api/inventory/batches?search=${encodeURIComponent(search)}`),
   inventoryMovements: (search = "") => request<{ movements: InventoryMovement[] }>(`/api/inventory/movements?search=${encodeURIComponent(search)}`),
   createInventoryMovement: (input: { productId: string; batchId?: string; movementType: string; quantity: number;

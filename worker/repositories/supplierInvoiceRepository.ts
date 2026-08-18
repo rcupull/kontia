@@ -39,4 +39,18 @@ export class SupplierInvoiceRepository {
         input.totalAmountCents, input.notes ?? "").run();
     return id;
   }
+
+  async update(businessId: string, id: string, input: SupplierInvoiceInput) {
+    const supplier = await this.db.prepare(`SELECT id FROM suppliers
+      WHERE id = ? AND business_id = ? AND deleted_at IS NULL`)
+      .bind(input.supplierId, businessId).first();
+    if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+    const result = await this.db.prepare(`UPDATE supplier_invoices SET
+        supplier_id = ?, invoice_number = ?, invoice_date = ?, total_amount_cents = ?,
+        notes = NULLIF(?, ''), updated_at = datetime('now')
+      WHERE id = ? AND business_id = ? AND deleted_at IS NULL`)
+      .bind(input.supplierId, input.invoiceNumber, input.invoiceDate, input.totalAmountCents,
+        input.notes ?? "", id, businessId).run();
+    return Number(result.meta.changes) > 0;
+  }
 }
