@@ -387,10 +387,17 @@ export function InventoryAdminPage() {
                 <FieldSelect
                   label="Producto"
                   placeholder="Seleccionar producto"
+                  isSearchable
+                  searchPlaceholder="Buscar producto..."
                   options={availableProducts.map((p) => ({
                     value: p.id,
                     label: p.name,
                   }))}
+                  getSearchFilter={(search, option) =>
+                    option.label
+                      .toLowerCase()
+                      .includes(search.trim().toLowerCase())
+                  }
                   register={methods.register("productId", {
                     required: "Selecciona un producto",
                   })}
@@ -551,10 +558,17 @@ export function InventoryAdminPage() {
                   <FieldSelect
                     label="Factura (opcional)"
                     placeholder="Sin factura"
+                    isSearchable
+                    searchPlaceholder="Buscar por factura o proveedor..."
                     options={invoices.map((i) => ({
                       value: i.id,
                       label: `${i.invoiceNumber} | ${i.supplierName} | ${i.invoiceDate}`,
                     }))}
+                    getSearchFilter={(search, option) =>
+                      option.label
+                        .toLowerCase()
+                        .includes(search.trim().toLowerCase())
+                    }
                     register={methods.register("supplierInvoiceId")}
                   />
                 )}
