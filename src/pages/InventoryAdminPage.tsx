@@ -4,12 +4,18 @@ import {
   ArrowLeftRight,
   Boxes,
   ClipboardList,
+  Pencil,
   Plus,
   Search,
   X,
 } from "lucide-react";
 import { api } from "../api";
-import { FieldInput, FieldSelect, FieldTextarea } from "../components/fields";
+import {
+  FieldDateTimePicker,
+  FieldInput,
+  FieldSelect,
+  FieldTextarea,
+} from "../components/fields";
 import type {
   InventoryBatch,
   InventoryMovement,
@@ -68,6 +74,7 @@ export function InventoryAdminPage() {
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [open, setOpen] = useState(false);
+  const [editingBatch, setEditingBatch] = useState<InventoryBatch | null>(null);
   const [error, setError] = useState("");
   type MovementValues = {
     productId: string;
@@ -80,6 +87,7 @@ export function InventoryAdminPage() {
     cashPrice: number;
     cardPrice: number;
     supplierInvoiceId: string;
+    receivedAt: string;
     notes: string;
   };
   const methods = useForm<MovementValues>({
@@ -94,8 +102,12 @@ export function InventoryAdminPage() {
       cashPrice: 0,
       cardPrice: 0,
       supplierInvoiceId: "",
+      receivedAt: new Date().toISOString(),
       notes: "",
     },
+  });
+  const batchDateMethods = useForm<{ receivedAt: string }>({
+    defaultValues: { receivedAt: "" },
   });
   async function load() {
     const [b, m, p, i, l] = await Promise.all([
@@ -195,17 +207,38 @@ export function InventoryAdminPage() {
           type === "purchase"
             ? values.supplierInvoiceId || undefined
             : undefined,
+        receivedAt: createsBatch ? values.receivedAt : undefined,
         notes: values.notes,
       });
       setOpen(false);
       setTab("movements");
       methods.reset();
+      methods.setValue("receivedAt", new Date().toISOString());
       await load();
     } catch (reason) {
       setError(
         reason instanceof Error
           ? reason.message
           : "No se pudo registrar el movimiento",
+      );
+    }
+  }
+
+  async function updateBatchDate(values: { receivedAt: string }) {
+    if (!editingBatch) return;
+    setError("");
+    try {
+      await api.updateInventoryBatchReceivedAt(
+        editingBatch.id,
+        values.receivedAt,
+      );
+      setEditingBatch(null);
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "No se pudo actualizar la fecha del lote",
       );
     }
   }
@@ -226,6 +259,7 @@ export function InventoryAdminPage() {
           onClick={() => {
             setError("");
             methods.reset();
+            methods.setValue("receivedAt", new Date().toISOString());
             setOpen(true);
           }}
           className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 font-black text-white"
@@ -263,6 +297,7 @@ export function InventoryAdminPage() {
                   <th>Existencias por ubicación</th>
                   <th>Montos</th>
                   <th>Recibido</th>
+                  <th aria-label="Acciones" />
                 </tr>
               </thead>
               <tbody>
@@ -306,6 +341,19 @@ export function InventoryAdminPage() {
                     </td>
                     <td className="text-sm">
                       {new Date(b.receivedAt).toLocaleString()}
+                    </td>
+                    <td className="pr-5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError("");
+                          batchDateMethods.reset({ receivedAt: b.receivedAt });
+                          setEditingBatch(b);
+                        }}
+                        className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-50"
+                      >
+                        <Pencil size={15} /> Editar fecha
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -505,6 +553,13 @@ export function InventoryAdminPage() {
                 />
                 {createsBatch && (
                   <>
+                    <FieldDateTimePicker
+                      label="Fecha de recepción del lote"
+                      register={methods.register("receivedAt", {
+                        required: "La fecha de recepción es obligatoria",
+                      })}
+                      error={methods.formState.errors.receivedAt}
+                    />
                     <FieldInput
                       label="Costo unitario"
                       type="number"
@@ -603,6 +658,58 @@ export function InventoryAdminPage() {
                   className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white"
                 >
                   Guardar
+                </button>
+              </div>
+            </form>
+          </FormProvider>
+        </div>
+      )}
+      {editingBatch && (
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/45 p-4">
+          <FormProvider {...batchDateMethods}>
+            <form
+              onSubmit={batchDateMethods.handleSubmit(updateBatchDate)}
+              className="mx-auto my-20 w-full max-w-md rounded-[2rem] bg-white p-7 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black">Editar fecha del lote</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {editingBatch.productName}. Esta fecha determina el orden
+                    FIFO.
+                  </p>
+                </div>
+                <button type="button" onClick={() => setEditingBatch(null)}>
+                  <X />
+                </button>
+              </div>
+              <div className="mt-6">
+                <FieldDateTimePicker
+                  label="Fecha de recepción"
+                  register={batchDateMethods.register("receivedAt", {
+                    required: "La fecha de recepción es obligatoria",
+                  })}
+                  error={batchDateMethods.formState.errors.receivedAt}
+                />
+              </div>
+              {error && (
+                <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">
+                  {error}
+                </p>
+              )}
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingBatch(null)}
+                  className="px-4 font-black text-slate-500"
+                >
+                  Cancelar
+                </button>
+                <button
+                  disabled={batchDateMethods.formState.isSubmitting}
+                  className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white"
+                >
+                  Guardar fecha
                 </button>
               </div>
             </form>

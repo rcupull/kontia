@@ -26,11 +26,26 @@ export type CreateMovementInput = {
   cashPriceCents?: number;
   cardPriceCents?: number;
   supplierInvoiceId?: string;
+  receivedAt?: string;
   notes?: string;
 };
 
 export class InventoryRepository {
   constructor(private readonly db: D1Database) {}
+
+  async updateReceivedAt(
+    businessId: string,
+    batchId: string,
+    receivedAt: string,
+  ) {
+    const result = await this.db
+      .prepare(
+        `UPDATE inventory_batches SET received_at=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND deleted_at IS NULL`,
+      )
+      .bind(receivedAt, batchId, businessId)
+      .run();
+    return Number(result.meta.changes) > 0;
+  }
 
   async listBatches(businessId: string, search = "") {
     const term = `%${search.trim()}%`;
@@ -260,7 +275,7 @@ export class InventoryRepository {
           input.unitCostCents,
           input.cashPriceCents,
           input.cardPriceCents,
-          new Date().toISOString(),
+          input.receivedAt ?? new Date().toISOString(),
           input.userId,
         ),
       this.addStock(
@@ -312,7 +327,7 @@ export class InventoryRepository {
           input.unitCostCents,
           input.cashPriceCents,
           input.cardPriceCents,
-          new Date().toISOString(),
+          input.receivedAt ?? new Date().toISOString(),
           input.userId,
         ),
       this.addStock(

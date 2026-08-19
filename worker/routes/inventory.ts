@@ -34,7 +34,11 @@ const input = z.object({
   cashPriceCents: z.number().int().positive().optional(),
   cardPriceCents: z.number().int().positive().optional(),
   supplierInvoiceId: z.string().uuid().optional(),
+  receivedAt: z.string().datetime({ offset: true }).optional(),
   notes: z.string().trim().max(500).optional(),
+});
+const receivedAtInput = z.object({
+  receivedAt: z.string().datetime({ offset: true }),
 });
 
 inventoryRoutes.get("/batches", async (c) =>
@@ -52,6 +56,20 @@ inventoryRoutes.get("/movements", async (c) =>
       c.req.query("search"),
     ),
   }),
+);
+inventoryRoutes.put(
+  "/batches/:id/received-at",
+  zValidator("json", receivedAtInput),
+  async (c) => {
+    const updated = await new InventoryRepository(c.env.DB).updateReceivedAt(
+      c.get("sessionUser").businessId,
+      c.req.param("id"),
+      c.req.valid("json").receivedAt,
+    );
+    return updated
+      ? c.json({ ok: true })
+      : c.json({ error: "Lote no encontrado" }, 404);
+  },
 );
 inventoryRoutes.post("/movements", zValidator("json", input), async (c) => {
   const user = c.get("sessionUser");
