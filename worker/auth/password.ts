@@ -37,15 +37,27 @@ export async function hashPassword(password: string) {
   return { hash: `${HASH_PREFIX}$${ITERATIONS}$${hash}`, salt: toBase64(salt) };
 }
 
-export async function verifyPassword(password: string, hash: string, salt: string) {
+export async function verifyPassword(
+  password: string,
+  hash: string,
+  salt: string,
+) {
   const parts = hash.split("$");
   const versioned = parts.length === 3 && parts[0] === HASH_PREFIX;
   const iterations = versioned ? Number(parts[1]) : LEGACY_ITERATIONS;
   const encodedHash = versioned ? parts[2] : hash;
-  if (!Number.isInteger(iterations) || iterations < 1 || iterations > ITERATIONS && versioned) return false;
+  if (
+    !Number.isInteger(iterations) ||
+    iterations < 1 ||
+    (iterations > ITERATIONS && versioned)
+  )
+    return false;
   let actual: Uint8Array;
-  try { actual = await derive(password, fromBase64(salt), iterations); }
-  catch { return false; }
+  try {
+    actual = await derive(password, fromBase64(salt), iterations);
+  } catch {
+    return false;
+  }
   const expected = fromBase64(encodedHash);
   if (actual.length !== expected.length) return false;
   let difference = 0;

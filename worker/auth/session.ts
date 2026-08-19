@@ -7,10 +7,14 @@ const COOKIE = "kontia_session";
 const MAX_AGE = 60 * 60 * 12;
 
 function encode(value: string | ArrayBuffer) {
-  const bytes = typeof value === "string" ? encoder.encode(value) : new Uint8Array(value);
+  const bytes =
+    typeof value === "string" ? encoder.encode(value) : new Uint8Array(value);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
 }
 
 async function sign(value: string, secret: string) {
@@ -24,8 +28,13 @@ async function sign(value: string, secret: string) {
   return encode(await crypto.subtle.sign("HMAC", key, encoder.encode(value)));
 }
 
-export async function createSession(c: Context<{ Bindings: Bindings; Variables: Variables }>, user: SessionUser) {
-  const payload = encode(JSON.stringify({ ...user, exp: Math.floor(Date.now() / 1000) + MAX_AGE }));
+export async function createSession(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  user: SessionUser,
+) {
+  const payload = encode(
+    JSON.stringify({ ...user, exp: Math.floor(Date.now() / 1000) + MAX_AGE }),
+  );
   const signature = await sign(payload, c.env.SESSION_SECRET);
   setCookie(c, COOKIE, `${payload}.${signature}`, {
     httpOnly: true,
@@ -40,18 +49,28 @@ export function clearSession(c: Context) {
   deleteCookie(c, COOKIE, { path: "/" });
 }
 
-async function readSession(c: Context<{ Bindings: Bindings; Variables: Variables }>): Promise<SessionUser | null> {
+async function readSession(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+): Promise<SessionUser | null> {
   const [payload, signature] = (getCookie(c, COOKIE) ?? "").split(".");
-  if (!payload || !signature || (await sign(payload, c.env.SESSION_SECRET)) !== signature) return null;
+  if (
+    !payload ||
+    !signature ||
+    (await sign(payload, c.env.SESSION_SECRET)) !== signature
+  )
+    return null;
   try {
     const json = atob(payload.replaceAll("-", "+").replaceAll("_", "/"));
     const data = JSON.parse(json) as SessionUser & { exp: number };
     if (data.exp <= Date.now() / 1000) return null;
-    const user = await c.env.DB.prepare(`SELECT u.id,u.business_id AS businessId,
+    const user = await c.env.DB.prepare(
+      `SELECT u.id,u.business_id AS businessId,
         u.display_name AS displayName,u.role
       FROM users u JOIN businesses b ON b.id=u.business_id
-      WHERE u.id=? AND u.business_id=? AND u.is_active=1 AND b.is_active=1`)
-      .bind(data.id,data.businessId).first<SessionUser>();
+      WHERE u.id=? AND u.business_id=? AND u.is_active=1 AND b.is_active=1`,
+    )
+      .bind(data.id, data.businessId)
+      .first<SessionUser>();
     return user ?? null;
   } catch {
     return null;
@@ -68,6 +87,8 @@ export async function requireSession(
   await next();
 }
 
-export async function optionalSession(c: Context<{ Bindings: Bindings; Variables: Variables }>) {
+export async function optionalSession(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+) {
   return readSession(c);
 }

@@ -7,9 +7,14 @@ export interface UseDebouncerReturn {
 export const useDebouncer = (): UseDebouncerReturn => {
   const timeoutId = useRef<ReturnType<typeof setTimeout> | null>(null);
   const out: UseDebouncerReturn = (callback: () => void, delay = 0) => {
-    if (timeoutId.current) { clearTimeout(timeoutId.current); timeoutId.current = null; }
+    if (timeoutId.current) {
+      clearTimeout(timeoutId.current);
+      timeoutId.current = null;
+    }
     timeoutId.current = setTimeout(callback, delay);
   };
-  out.cancel = () => { if (timeoutId.current) clearTimeout(timeoutId.current); };
+  out.cancel = () => {
+    if (timeoutId.current) clearTimeout(timeoutId.current);
+  };
   return out;
 };

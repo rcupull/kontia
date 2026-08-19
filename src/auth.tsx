@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { api } from "./api";
 import type { SessionUser } from "./types";
 
@@ -20,7 +27,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function refresh() {
     setLoading(true);
     try {
-      const [setup, session] = await Promise.all([api.setupStatus(), api.session()]);
+      const [setup, session] = await Promise.all([
+        api.setupStatus(),
+        api.session(),
+      ]);
       setSetupRequired(setup.required);
       setUser(session.user);
     } finally {
@@ -28,8 +38,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  useEffect(() => { void refresh(); }, []);
-  const value = useMemo(() => ({ loading, setupRequired, user, refresh, setUser }), [loading, setupRequired, user]);
+  useEffect(() => {
+    void refresh();
+  }, []);
+  const value = useMemo(
+    () => ({ loading, setupRequired, user, refresh, setUser }),
+    [loading, setupRequired, user],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

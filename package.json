@@ -12,7 +12,9 @@
     "deploy": "npm run build && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply kontia-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply kontia-db --remote",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "1.44.0",
@@ -36,6 +38,7 @@
     "@types/react-dom": "19.2.3",
     "@types/react-date-range": "1.4.10",
     "@vitejs/plugin-react": "6.0.3",
+    "prettier": "3.9.5",
     "tailwindcss": "4.3.2",
     "typescript": "7.0.2",
     "vite": "8.1.4",

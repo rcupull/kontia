@@ -20,7 +20,15 @@ app.onError((error, c) => {
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.route("/api/auth", authRoutes);
 app.get("/media/:key", getImage);
-for (const resource of ["products", "categories", "images", "suppliers", "supplier-invoices", "inventory", "locations"]) {
+for (const resource of [
+  "products",
+  "categories",
+  "images",
+  "suppliers",
+  "supplier-invoices",
+  "inventory",
+  "locations",
+]) {
   app.use(`/api/${resource}`, requireSession);
   app.use(`/api/${resource}/*`, requireSession);
 }

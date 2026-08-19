@@ -1,21 +1,217 @@
-import { useEffect,useMemo,useState } from "react";
-import { FormProvider,useForm } from "react-hook-form";
-import { MapPin,Pencil,Plus,Search,X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { FormProvider, useForm } from "react-hook-form";
+import { MapPin, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
-import { FieldInput,FieldSelect } from "../components/fields";
+import { FieldInput, FieldSelect } from "../components/fields";
 import type { Location } from "../types";
 
-type Values={code:string;name:string;type:Location["type"];address:string};
-export function LocationsPage(){
- const [items,setItems]=useState<Location[]>([]),[search,setSearch]=useState(""),[open,setOpen]=useState(false),[editing,setEditing]=useState<Location|null>(null),[error,setError]=useState("");
- const methods=useForm<Values>({defaultValues:{code:"",name:"",type:"warehouse",address:""}});
- async function load(){setItems((await api.locations()).locations)} useEffect(()=>{void load()},[]);
- const visible=useMemo(()=>items.filter(x=>`${x.code} ${x.name} ${x.address??""}`.toLowerCase().includes(search.toLowerCase())),[items,search]);
- function show(item?:Location){setEditing(item??null);setError("");methods.reset(item?{code:item.code,name:item.name,type:item.type,address:item.address??""}:{code:"",name:"",type:"warehouse",address:""});setOpen(true)}
- async function submit(values:Values){try{editing?await api.updateLocation(editing.id,values):await api.createLocation(values);setOpen(false);await load()}catch(reason){setError(reason instanceof Error?reason.message:"No se pudo guardar")}}
- async function toggle(item:Location){await api.setLocationActive(item.id,!item.isActive);await load()}
- return <section><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-sm font-black uppercase tracking-wider text-emerald-700">Inventario</p><h1 className="mt-1 text-3xl font-black">Ubicaciones</h1><p className="mt-2 text-slate-500">Almacenes y puntos de venta donde existe inventario.</p></div><button onClick={()=>show()} className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 font-black text-white"><Plus size={18}/> Nueva ubicación</button></div>
- <div className="mt-6 rounded-3xl bg-white shadow-sm"><div className="flex items-center gap-3 border-b border-slate-100 p-4"><Search className="text-slate-400"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar ubicación" className="w-full py-2 outline-none"/></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left"><thead className="text-xs uppercase text-slate-400"><tr><th className="px-5 py-4">Código</th><th>Ubicación</th><th>Tipo</th><th>Unidades</th><th>Estado</th><th/></tr></thead><tbody>{visible.map(item=><tr key={item.id} className="border-t border-slate-100"><td className="px-5 py-4 font-black">{item.code}</td><td><p className="font-bold">{item.name}</p><p className="text-xs text-slate-400">{item.address||"Sin dirección"}</p></td><td>{item.type==="warehouse"?"Almacén":"Punto de venta"}</td><td className="font-black">{item.totalUnits}</td><td><button onClick={()=>void toggle(item)} className={`rounded-full px-3 py-1 text-xs font-black ${item.isActive?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-700"}`}>{item.isActive?"Activa":"Inactiva"}</button></td><td><button onClick={()=>show(item)} className="rounded-xl border p-2"><Pencil size={16}/></button></td></tr>)}</tbody></table></div>{!visible.length&&<div className="grid place-items-center p-14 text-slate-400"><MapPin size={38}/><p className="mt-3 font-bold">No hay ubicaciones.</p></div>}</div>
- {open&&<div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4"><FormProvider {...methods}><form onSubmit={methods.handleSubmit(submit)} className="w-full max-w-lg rounded-[2rem] bg-white p-7"><div className="flex justify-between"><h2 className="text-2xl font-black">{editing?"Editar ubicación":"Nueva ubicación"}</h2><button type="button" onClick={()=>setOpen(false)}><X/></button></div><div className="mt-6 grid gap-4"><FieldInput label="Código" register={methods.register("code",{required:"El código es obligatorio"})} error={methods.formState.errors.code}/><FieldInput label="Nombre" register={methods.register("name",{required:"El nombre es obligatorio"})} error={methods.formState.errors.name}/><FieldSelect label="Tipo" options={[{value:"warehouse",label:"Almacén"},{value:"point_of_sale",label:"Punto de venta"}]} register={methods.register("type",{required:true})}/><FieldInput label="Dirección" register={methods.register("address")}/></div>{error&&<p className="mt-4 rounded-2xl bg-red-50 p-3 font-bold text-red-700">{error}</p>}<div className="mt-6 flex justify-end gap-3"><button type="button" onClick={()=>setOpen(false)} className="font-black text-slate-500">Cancelar</button><button className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white">Guardar</button></div></form></FormProvider></div>}
- </section>;
+type Values = {
+  code: string;
+  name: string;
+  type: Location["type"];
+  address: string;
+};
+export function LocationsPage() {
+  const [items, setItems] = useState<Location[]>([]),
+    [search, setSearch] = useState(""),
+    [open, setOpen] = useState(false),
+    [editing, setEditing] = useState<Location | null>(null),
+    [error, setError] = useState("");
+  const methods = useForm<Values>({
+    defaultValues: { code: "", name: "", type: "warehouse", address: "" },
+  });
+  async function load() {
+    setItems((await api.locations()).locations);
+  }
+  useEffect(() => {
+    void load();
+  }, []);
+  const visible = useMemo(
+    () =>
+      items.filter((x) =>
+        `${x.code} ${x.name} ${x.address ?? ""}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+      ),
+    [items, search],
+  );
+  function show(item?: Location) {
+    setEditing(item ?? null);
+    setError("");
+    methods.reset(
+      item
+        ? {
+            code: item.code,
+            name: item.name,
+            type: item.type,
+            address: item.address ?? "",
+          }
+        : { code: "", name: "", type: "warehouse", address: "" },
+    );
+    setOpen(true);
+  }
+  async function submit(values: Values) {
+    try {
+      editing
+        ? await api.updateLocation(editing.id, values)
+        : await api.createLocation(values);
+      setOpen(false);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "No se pudo guardar");
+    }
+  }
+  async function toggle(item: Location) {
+    await api.setLocationActive(item.id, !item.isActive);
+    await load();
+  }
+  return (
+    <section>
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-sm font-black uppercase tracking-wider text-emerald-700">
+            Inventario
+          </p>
+          <h1 className="mt-1 text-3xl font-black">Ubicaciones</h1>
+          <p className="mt-2 text-slate-500">
+            Almacenes y puntos de venta donde existe inventario.
+          </p>
+        </div>
+        <button
+          onClick={() => show()}
+          className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 font-black text-white"
+        >
+          <Plus size={18} /> Nueva ubicación
+        </button>
+      </div>
+      <div className="mt-6 rounded-3xl bg-white shadow-sm">
+        <div className="flex items-center gap-3 border-b border-slate-100 p-4">
+          <Search className="text-slate-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar ubicación"
+            className="w-full py-2 outline-none"
+          />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px] text-left">
+            <thead className="text-xs uppercase text-slate-400">
+              <tr>
+                <th className="px-5 py-4">Código</th>
+                <th>Ubicación</th>
+                <th>Tipo</th>
+                <th>Unidades</th>
+                <th>Estado</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((item) => (
+                <tr key={item.id} className="border-t border-slate-100">
+                  <td className="px-5 py-4 font-black">{item.code}</td>
+                  <td>
+                    <p className="font-bold">{item.name}</p>
+                    <p className="text-xs text-slate-400">
+                      {item.address || "Sin dirección"}
+                    </p>
+                  </td>
+                  <td>
+                    {item.type === "warehouse" ? "Almacén" : "Punto de venta"}
+                  </td>
+                  <td className="font-black">{item.totalUnits}</td>
+                  <td>
+                    <button
+                      onClick={() => void toggle(item)}
+                      className={`rounded-full px-3 py-1 text-xs font-black ${item.isActive ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}
+                    >
+                      {item.isActive ? "Activa" : "Inactiva"}
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      onClick={() => show(item)}
+                      className="rounded-xl border p-2"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!visible.length && (
+          <div className="grid place-items-center p-14 text-slate-400">
+            <MapPin size={38} />
+            <p className="mt-3 font-bold">No hay ubicaciones.</p>
+          </div>
+        )}
+      </div>
+      {open && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4">
+          <FormProvider {...methods}>
+            <form
+              onSubmit={methods.handleSubmit(submit)}
+              className="w-full max-w-lg rounded-[2rem] bg-white p-7"
+            >
+              <div className="flex justify-between">
+                <h2 className="text-2xl font-black">
+                  {editing ? "Editar ubicación" : "Nueva ubicación"}
+                </h2>
+                <button type="button" onClick={() => setOpen(false)}>
+                  <X />
+                </button>
+              </div>
+              <div className="mt-6 grid gap-4">
+                <FieldInput
+                  label="Código"
+                  register={methods.register("code", {
+                    required: "El código es obligatorio",
+                  })}
+                  error={methods.formState.errors.code}
+                />
+                <FieldInput
+                  label="Nombre"
+                  register={methods.register("name", {
+                    required: "El nombre es obligatorio",
+                  })}
+                  error={methods.formState.errors.name}
+                />
+                <FieldSelect
+                  label="Tipo"
+                  options={[
+                    { value: "warehouse", label: "Almacén" },
+                    { value: "point_of_sale", label: "Punto de venta" },
+                  ]}
+                  register={methods.register("type", { required: true })}
+                />
+                <FieldInput
+                  label="Dirección"
+                  register={methods.register("address")}
+                />
+              </div>
+              {error && (
+                <p className="mt-4 rounded-2xl bg-red-50 p-3 font-bold text-red-700">
+                  {error}
+                </p>
+              )}
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="font-black text-slate-500"
+                >
+                  Cancelar
+                </button>
+                <button className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white">
+                  Guardar
+                </button>
+              </div>
+            </form>
+          </FormProvider>
+        </div>
+      )}
+    </section>
+  );
 }
