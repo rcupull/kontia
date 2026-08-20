@@ -33,16 +33,40 @@ export type CreateMovementInput = {
 export class InventoryRepository {
   constructor(private readonly db: D1Database) {}
 
-  async updateReceivedAt(
+  async updateBatch(
     businessId: string,
     batchId: string,
-    receivedAt: string,
+    input: {
+      receivedAt: string;
+      unitCostCents: number;
+      cashPriceCents: number;
+      cardPriceCents: number;
+      supplierInvoiceId: string | null;
+    },
   ) {
+    if (
+      input.supplierInvoiceId &&
+      !(await this.db
+        .prepare(
+          `SELECT id FROM supplier_invoices WHERE id=? AND business_id=? AND deleted_at IS NULL`,
+        )
+        .bind(input.supplierInvoiceId, businessId)
+        .first())
+    )
+      throw new Error("INVOICE_NOT_FOUND");
     const result = await this.db
       .prepare(
-        `UPDATE inventory_batches SET received_at=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND deleted_at IS NULL`,
+        `UPDATE inventory_batches SET received_at=?,unit_cost_cents=?,cash_price_cents=?,card_price_cents=?,supplier_invoice_id=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND deleted_at IS NULL`,
       )
-      .bind(receivedAt, batchId, businessId)
+      .bind(
+        input.receivedAt,
+        input.unitCostCents,
+        input.cashPriceCents,
+        input.cardPriceCents,
+        input.supplierInvoiceId,
+        batchId,
+        businessId,
+      )
       .run();
     return Number(result.meta.changes) > 0;
   }

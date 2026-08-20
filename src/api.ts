@@ -169,10 +169,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
-  updateInventoryBatchReceivedAt: (id: string, receivedAt: string) =>
-    request<{ ok: boolean }>(`/api/inventory/batches/${id}/received-at`, {
+  updateInventoryBatch: (
+    id: string,
+    input: {
+      receivedAt: string;
+      unitCostCents: number;
+      cashPriceCents: number;
+      cardPriceCents: number;
+      supplierInvoiceId: string | null;
+    },
+  ) =>
+    request<{ ok: boolean }>(`/api/inventory/batches/${id}`, {
       method: "PUT",
-      body: JSON.stringify({ receivedAt }),
+      body: JSON.stringify(input),
     }),
   locations: (search = "") =>
     request<{ locations: Location[] }>(

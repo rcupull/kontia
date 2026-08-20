@@ -37,8 +37,12 @@ const input = z.object({
   receivedAt: z.string().datetime({ offset: true }).optional(),
   notes: z.string().trim().max(500).optional(),
 });
-const receivedAtInput = z.object({
+const batchInput = z.object({
   receivedAt: z.string().datetime({ offset: true }),
+  unitCostCents: z.number().int().nonnegative(),
+  cashPriceCents: z.number().int().nonnegative(),
+  cardPriceCents: z.number().int().nonnegative(),
+  supplierInvoiceId: z.string().uuid().nullable(),
 });
 
 inventoryRoutes.get("/batches", async (c) =>
@@ -58,17 +62,23 @@ inventoryRoutes.get("/movements", async (c) =>
   }),
 );
 inventoryRoutes.put(
-  "/batches/:id/received-at",
-  zValidator("json", receivedAtInput),
+  "/batches/:id",
+  zValidator("json", batchInput),
   async (c) => {
-    const updated = await new InventoryRepository(c.env.DB).updateReceivedAt(
-      c.get("sessionUser").businessId,
-      c.req.param("id"),
-      c.req.valid("json").receivedAt,
-    );
-    return updated
-      ? c.json({ ok: true })
-      : c.json({ error: "Lote no encontrado" }, 404);
+    try {
+      const updated = await new InventoryRepository(c.env.DB).updateBatch(
+        c.get("sessionUser").businessId,
+        c.req.param("id"),
+        c.req.valid("json"),
+      );
+      return updated
+        ? c.json({ ok: true })
+        : c.json({ error: "Lote no encontrado" }, 404);
+    } catch (error) {
+      if (error instanceof Error && error.message === "INVOICE_NOT_FOUND")
+        return c.json({ error: "Factura no encontrada" }, 404);
+      throw error;
+    }
   },
 );
 inventoryRoutes.post("/movements", zValidator("json", input), async (c) => {

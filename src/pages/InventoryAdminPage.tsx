@@ -106,8 +106,21 @@ export function InventoryAdminPage() {
       notes: "",
     },
   });
-  const batchDateMethods = useForm<{ receivedAt: string }>({
-    defaultValues: { receivedAt: "" },
+  type BatchValues = {
+    receivedAt: string;
+    unitCost: number;
+    cashPrice: number;
+    cardPrice: number;
+    supplierInvoiceId: string;
+  };
+  const batchMethods = useForm<BatchValues>({
+    defaultValues: {
+      receivedAt: "",
+      unitCost: 0,
+      cashPrice: 0,
+      cardPrice: 0,
+      supplierInvoiceId: "",
+    },
   });
   async function load() {
     const [b, m, p, i, l] = await Promise.all([
@@ -224,21 +237,24 @@ export function InventoryAdminPage() {
     }
   }
 
-  async function updateBatchDate(values: { receivedAt: string }) {
+  async function updateBatch(values: BatchValues) {
     if (!editingBatch) return;
     setError("");
     try {
-      await api.updateInventoryBatchReceivedAt(
-        editingBatch.id,
-        values.receivedAt,
-      );
+      await api.updateInventoryBatch(editingBatch.id, {
+        receivedAt: values.receivedAt,
+        unitCostCents: Math.round(values.unitCost * 100),
+        cashPriceCents: Math.round(values.cashPrice * 100),
+        cardPriceCents: Math.round(values.cardPrice * 100),
+        supplierInvoiceId: values.supplierInvoiceId || null,
+      });
       setEditingBatch(null);
       await load();
     } catch (reason) {
       setError(
         reason instanceof Error
           ? reason.message
-          : "No se pudo actualizar la fecha del lote",
+          : "No se pudo actualizar el lote",
       );
     }
   }
@@ -347,12 +363,18 @@ export function InventoryAdminPage() {
                         type="button"
                         onClick={() => {
                           setError("");
-                          batchDateMethods.reset({ receivedAt: b.receivedAt });
+                          batchMethods.reset({
+                            receivedAt: b.receivedAt,
+                            unitCost: b.unitCostCents / 100,
+                            cashPrice: b.cashPriceCents / 100,
+                            cardPrice: b.cardPriceCents / 100,
+                            supplierInvoiceId: b.supplierInvoiceId ?? "",
+                          });
                           setEditingBatch(b);
                         }}
                         className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-50"
                       >
-                        <Pencil size={15} /> Editar fecha
+                        <Pencil size={15} /> Editar lote
                       </button>
                     </td>
                   </tr>
@@ -666,31 +688,88 @@ export function InventoryAdminPage() {
       )}
       {editingBatch && (
         <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/45 p-4">
-          <FormProvider {...batchDateMethods}>
+          <FormProvider {...batchMethods}>
             <form
-              onSubmit={batchDateMethods.handleSubmit(updateBatchDate)}
-              className="mx-auto my-20 w-full max-w-md rounded-[2rem] bg-white p-7 shadow-2xl"
+              onSubmit={batchMethods.handleSubmit(updateBatch)}
+              className="mx-auto my-12 w-full max-w-lg rounded-[2rem] bg-white p-7 shadow-2xl"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-2xl font-black">Editar fecha del lote</h2>
+                  <h2 className="text-2xl font-black">Editar lote</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    {editingBatch.productName}. Esta fecha determina el orden
-                    FIFO.
+                    {editingBatch.productName}. La fecha determina el orden FIFO
+                    y los precios pertenecen únicamente a este lote.
                   </p>
                 </div>
                 <button type="button" onClick={() => setEditingBatch(null)}>
                   <X />
                 </button>
               </div>
-              <div className="mt-6">
+              <div className="mt-6 grid gap-4">
                 <FieldDateTimePicker
                   label="Fecha de recepción"
-                  register={batchDateMethods.register("receivedAt", {
+                  register={batchMethods.register("receivedAt", {
                     required: "La fecha de recepción es obligatoria",
                   })}
-                  error={batchDateMethods.formState.errors.receivedAt}
+                  error={batchMethods.formState.errors.receivedAt}
                 />
+                <FieldSelect
+                  label="Factura (opcional)"
+                  placeholder="Sin factura"
+                  isSearchable
+                  searchPlaceholder="Buscar por factura o proveedor..."
+                  options={[
+                    { value: "", label: "Sin factura" },
+                    ...invoices.map((invoice) => ({
+                      value: invoice.id,
+                      label: `${invoice.invoiceNumber} | ${invoice.supplierName} | ${invoice.invoiceDate}`,
+                    })),
+                  ]}
+                  getSearchFilter={(search, option) =>
+                    option.label
+                      .toLowerCase()
+                      .includes(search.trim().toLowerCase())
+                  }
+                  register={batchMethods.register("supplierInvoiceId")}
+                />
+                <FieldInput
+                  label="Costo unitario"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  register={batchMethods.register("unitCost", {
+                    valueAsNumber: true,
+                    required: "El costo es obligatorio",
+                    min: { value: 0, message: "No puede ser negativo" },
+                  })}
+                  error={batchMethods.formState.errors.unitCost}
+                />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <FieldInput
+                    label="Precio efectivo"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    register={batchMethods.register("cashPrice", {
+                      valueAsNumber: true,
+                      required: "El precio es obligatorio",
+                      min: { value: 0, message: "No puede ser negativo" },
+                    })}
+                    error={batchMethods.formState.errors.cashPrice}
+                  />
+                  <FieldInput
+                    label="Precio tarjeta"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    register={batchMethods.register("cardPrice", {
+                      valueAsNumber: true,
+                      required: "El precio es obligatorio",
+                      min: { value: 0, message: "No puede ser negativo" },
+                    })}
+                    error={batchMethods.formState.errors.cardPrice}
+                  />
+                </div>
               </div>
               {error && (
                 <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">
@@ -706,10 +785,10 @@ export function InventoryAdminPage() {
                   Cancelar
                 </button>
                 <button
-                  disabled={batchDateMethods.formState.isSubmitting}
+                  disabled={batchMethods.formState.isSubmitting}
                   className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white"
                 >
-                  Guardar fecha
+                  Guardar cambios
                 </button>
               </div>
             </form>
