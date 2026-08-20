@@ -97,3 +97,51 @@ export type InventoryMovement = {
   destinationLocationId?: string;
   destinationLocationName?: string;
 };
+export type SaleItem = {
+  id: string;
+  productName: string;
+  quantity: number;
+  unitPriceCents: number;
+  totalCents: number;
+};
+export type Sale = {
+  id: string;
+  paymentMethod: "cash" | "card";
+  totalCents: number;
+  createdAt: string;
+  sellerName: string;
+  locationName?: string;
+  refundId?: string;
+  refundNotes?: string;
+  items: SaleItem[];
+};
+export type CashSession = {
+  id: string;
+  status: "open" | "closed";
+  openedAt: string;
+  closedAt?: string;
+  openingAmountCents: number;
+  expectedCashAmountCents: number;
+  countedCashAmountCents?: number;
+  differenceCents?: number;
+  sellerName: string;
+  locationName?: string;
+  totalOrders: number;
+  netSalesCents: number;
+  cashSalesCents: number;
+  cardSalesCents: number;
+  refundsCents: number;
+};
+export type FinancialMovement = {
+  id: string;
+  type: string;
+  expenseType?: string;
+  moneyLocation: string;
+  amountCents: number;
+  description: string;
+  movementDate: string;
+  notes?: string;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
+  createdAt: string;
+};

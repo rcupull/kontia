@@ -9,6 +9,13 @@ import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { SupplierInvoicesPage } from "./pages/SupplierInvoicesPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { LocationsPage } from "./pages/LocationsPage";
+import { MaintenancePage } from "./pages/MaintenancePage";
+import {
+  CashSessionsPage,
+  DashboardPage,
+  FinancialMovementsPage,
+  SalesPage,
+} from "./pages/AdminDataPages";
 
 export default function App() {
   const { loading, user } = useAuth();
@@ -23,15 +30,7 @@ export default function App() {
     <Routes>
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to="dashboard" replace />} />
-        <Route
-          path="dashboard"
-          element={
-            <PlaceholderPage
-              title="Dashboard"
-              description="Indicadores de ventas, inventario, caja y rentabilidad."
-            />
-          }
-        />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="products" element={<InventoryPage />} />
         <Route
@@ -47,41 +46,11 @@ export default function App() {
         <Route path="supplier-invoices" element={<SupplierInvoicesPage />} />
         <Route path="inventory" element={<InventoryAdminPage />} />
         <Route path="locations" element={<LocationsPage />} />
-        <Route
-          path="orders"
-          element={
-            <PlaceholderPage
-              title="Ventas"
-              description="Historial de órdenes, detalles y devoluciones."
-            />
-          }
-        />
-        <Route
-          path="cash-sessions"
-          element={
-            <PlaceholderPage
-              title="Sesiones de caja"
-              description="Aperturas, cierres, arqueos y diferencias de caja."
-            />
-          }
-        />
-        <Route
-          path="operating-expenses"
-          element={
-            <PlaceholderPage
-              title="Gastos operativos"
-              description="Salarios, servicios, transporte y demás gastos del negocio."
-            />
-          }
-        />
+        <Route path="orders" element={<SalesPage />} />
+        <Route path="cash-sessions" element={<CashSessionsPage />} />
         <Route
           path="financial-movements"
-          element={
-            <PlaceholderPage
-              title="Movimientos financieros"
-              description="Entradas y salidas de efectivo y cuenta bancaria."
-            />
-          }
+          element={<FinancialMovementsPage />}
         />
         <Route
           path="users"
@@ -101,15 +70,7 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="maintenance"
-          element={
-            <PlaceholderPage
-              title="Mantenimiento"
-              description="Diagnósticos de integridad, auditoría y herramientas administrativas."
-            />
-          }
-        />
+        <Route path="maintenance" element={<MaintenancePage />} />
         <Route
           path="settings"
           element={

@@ -6,6 +6,8 @@ import { supplierRoutes } from "./routes/suppliers";
 import { supplierInvoiceRoutes } from "./routes/supplierInvoices";
 import { inventoryRoutes } from "./routes/inventory";
 import { locationRoutes } from "./routes/locations";
+import { maintenanceRoutes } from "./routes/maintenance";
+import { adminRoutes } from "./routes/admin";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -28,6 +30,8 @@ for (const resource of [
   "supplier-invoices",
   "inventory",
   "locations",
+  "maintenance",
+  "admin-data",
 ]) {
   app.use(`/api/${resource}`, requireSession);
   app.use(`/api/${resource}/*`, requireSession);
@@ -39,5 +43,7 @@ app.route("/api/suppliers", supplierRoutes);
 app.route("/api/supplier-invoices", supplierInvoiceRoutes);
 app.route("/api/inventory", inventoryRoutes);
 app.route("/api/locations", locationRoutes);
+app.route("/api/maintenance", maintenanceRoutes);
+app.route("/api/admin-data", adminRoutes);
 
 export default app;

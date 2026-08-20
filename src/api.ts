@@ -3,6 +3,9 @@ import type {
   InventoryBatch,
   InventoryMovement,
   Location,
+  Sale,
+  CashSession,
+  FinancialMovement,
   Product,
   SessionUser,
   Supplier,
@@ -183,6 +186,62 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  importLitePos: (input: unknown) =>
+    request<{
+      ok: boolean;
+      imported: {
+        products: number;
+        batches: number;
+        movements: number;
+        sales: number;
+        images: number;
+      };
+    }>("/api/maintenance/import-litepos", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  adminSales: (search = "") =>
+    request<{ sales: Sale[] }>(
+      `/api/admin-data/sales?search=${encodeURIComponent(search)}`,
+    ),
+  adminSessions: (search = "") =>
+    request<{ sessions: CashSession[] }>(
+      `/api/admin-data/sessions?search=${encodeURIComponent(search)}`,
+    ),
+  financialMovements: (search = "") =>
+    request<{ movements: FinancialMovement[] }>(
+      `/api/admin-data/financial?search=${encodeURIComponent(search)}`,
+    ),
+  saveFinancialMovement: (
+    id: string | null,
+    input: {
+      type: string;
+      expenseType?: string;
+      moneyLocation: string;
+      amountCents: number;
+      description: string;
+      movementDate: string;
+      notes?: string;
+    },
+  ) =>
+    request(
+      id ? `/api/admin-data/financial/${id}` : "/api/admin-data/financial",
+      { method: id ? "PUT" : "POST", body: JSON.stringify(input) },
+    ),
+  dashboard: () =>
+    request<{
+      sales: { orders: number; salesCents: number; refundsCents: number };
+      inventory: { units: number; costCents: number };
+      finance: { balanceCents: number };
+      products: { products: number };
+      recentSales: Array<{
+        id: string;
+        createdAt: string;
+        totalCents: number;
+        paymentMethod: string;
+        sellerName: string;
+      }>;
+    }>("/api/admin-data/dashboard"),
   locations: (search = "") =>
     request<{ locations: Location[] }>(
       `/api/locations?search=${encodeURIComponent(search)}`,
