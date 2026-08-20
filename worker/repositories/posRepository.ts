@@ -1,6 +1,9 @@
 type SaleInput = {
   businessId: string;
   userId: string;
+  operationId: string;
+  createdAt: string;
+  expectedTotalCents: number;
   paymentMethod: "cash" | "card";
   items: Array<{ productId: string; quantity: number }>;
 };
@@ -140,8 +143,22 @@ export class PosRepository {
     };
   }
   async sale(input: SaleInput) {
+    const existing = await this.db
+      .prepare(
+        `SELECT id,total_cents AS totalCents FROM sales WHERE business_id=? AND client_operation_id=?`,
+      )
+      .bind(input.businessId, input.operationId)
+      .first<{ id: string; totalCents: number }>();
+    if (existing) return existing;
     const session = await this.activeSession(input.businessId, input.userId);
     if (!session) throw new Error("SESSION_REQUIRED");
+    const createdAt = Date.parse(input.createdAt);
+    if (
+      createdAt < Date.parse(session.openedAt) ||
+      createdAt > Date.now() + 5 * 60 * 1000 ||
+      Date.now() - createdAt > 65 * 60 * 1000
+    )
+      throw new Error("OFFLINE_PERIOD_EXPIRED");
     const saleId = crypto.randomUUID(),
       statements: D1PreparedStatement[] = [];
     let totalCents = 0;
@@ -195,7 +212,7 @@ export class PosRepository {
             ),
           this.db
             .prepare(
-              `INSERT INTO inventory_movements (id,business_id,product_id,batch_id,source_location_id,sale_id,movement_type,quantity,created_by_user_id) VALUES (?,?,?,?,?,?,'sale',?,?)`,
+              `INSERT INTO inventory_movements (id,business_id,product_id,batch_id,source_location_id,sale_id,movement_type,quantity,created_by_user_id,created_at) VALUES (?,?,?,?,?,?,'sale',?,?,?)`,
             )
             .bind(
               crypto.randomUUID(),
@@ -206,6 +223,7 @@ export class PosRepository {
               saleId,
               quantity,
               input.userId,
+              input.createdAt,
             ),
         );
         remaining -= quantity;
@@ -216,7 +234,7 @@ export class PosRepository {
       statements.push(
         this.db
           .prepare(
-            `INSERT INTO sale_items (id,business_id,sale_id,product_id,product_name,batch_id,quantity,unit_price_cents,total_cents) VALUES (?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO sale_items (id,business_id,sale_id,product_id,product_name,batch_id,quantity,unit_price_cents,total_cents,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
           )
           .bind(
             crypto.randomUUID(),
@@ -228,13 +246,16 @@ export class PosRepository {
             requested,
             unitPriceCents,
             itemTotal,
+            input.createdAt,
           ),
       );
     }
+    if (totalCents !== input.expectedTotalCents)
+      throw new Error("PRICE_CHANGED");
     statements.unshift(
       this.db
         .prepare(
-          `INSERT INTO sales (id,business_id,cash_session_id,seller_id,payment_method,total_cents,location_id) VALUES (?,?,?,?,?,?,?)`,
+          `INSERT INTO sales (id,business_id,cash_session_id,seller_id,payment_method,total_cents,location_id,client_operation_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
         )
         .bind(
           saleId,
@@ -244,6 +265,8 @@ export class PosRepository {
           input.paymentMethod,
           totalCents,
           session.locationId,
+          input.operationId,
+          input.createdAt,
         ),
     );
     await this.db.batch(statements);

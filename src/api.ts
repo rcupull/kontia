@@ -286,6 +286,9 @@ export const api = {
       body: JSON.stringify({ locationId, openingAmountCents }),
     }),
   createPosSale: (input: {
+    operationId: string;
+    createdAt: string;
+    expectedTotalCents: number;
     paymentMethod: "cash" | "card";
     items: Array<{ productId: string; quantity: number }>;
   }) =>

@@ -9,11 +9,14 @@ import {
   Plus,
   Search,
   ShoppingCart,
+  Wifi,
+  WifiOff,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { FieldInput, FieldSelect, FieldTextarea } from "../components/fields";
+import { offlineLimitMs, posOffline, type PendingSale } from "../posOffline";
 type State = Awaited<ReturnType<typeof api.posState>>;
 type Product = State["products"][number];
 type Order = Awaited<ReturnType<typeof api.posOrders>>["orders"][number];
@@ -32,7 +35,12 @@ export function PosPage() {
     [closing, setClosing] = useState(false),
     [ordersOpen, setOrdersOpen] = useState(false),
     [orders, setOrders] = useState<Order[]>([]),
-    [refunding, setRefunding] = useState<Order | null>(null);
+    [refunding, setRefunding] = useState<Order | null>(null),
+    [online, setOnline] = useState(navigator.onLine),
+    [pendingSales, setPendingSales] = useState<PendingSale[]>([]),
+    [lastSync, setLastSync] = useState(0),
+    [syncing, setSyncing] = useState(false),
+    [clock, setClock] = useState(Date.now());
   const openForm = useForm<{ locationId: string; amount: number }>({
       defaultValues: { locationId: "", amount: 0 },
     }),
@@ -41,15 +49,81 @@ export function PosPage() {
   const countedCashCents = Math.round(
     Number(closeForm.watch("amount") || 0) * 100,
   );
-  const load = () =>
-    api
-      .posState()
-      .then(setData)
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "No se pudo cargar el POS"),
-      );
+  async function load() {
+    try {
+      const state = await api.posState();
+      setData(state);
+      setOnline(true);
+      setLastSync(Date.now());
+      await posOffline.saveSnapshot(state);
+    } catch (reason) {
+      const snapshot = await posOffline.snapshot();
+      setOnline(false);
+      if (
+        snapshot?.state.session &&
+        Date.now() - snapshot.syncedAt <= offlineLimitMs
+      ) {
+        setData(snapshot.state);
+        setLastSync(snapshot.syncedAt);
+      } else
+        setError(
+          reason instanceof Error
+            ? `${reason.message}. El período offline disponible expiró.`
+            : "No se pudo cargar el POS",
+        );
+    }
+    setPendingSales(await posOffline.sales());
+  }
+  async function syncPending() {
+    if (!navigator.onLine || syncing) return;
+    setSyncing(true);
+    const queued = await posOffline.sales();
+    for (const sale of queued) {
+      try {
+        await api.createPosSale({
+          operationId: sale.operationId,
+          createdAt: sale.createdAt,
+          expectedTotalCents: sale.expectedTotalCents,
+          paymentMethod: sale.paymentMethod,
+          items: sale.items,
+        });
+        await posOffline.removeSale(sale.operationId);
+      } catch (reason) {
+        await posOffline.putSale({
+          ...sale,
+          status: "conflict",
+          error:
+            reason instanceof Error
+              ? reason.message
+              : "Conflicto de sincronización",
+        });
+        break;
+      }
+    }
+    setPendingSales(await posOffline.sales());
+    setSyncing(false);
+    await load();
+  }
   useEffect(() => {
-    void load();
+    void (async () => {
+      if (navigator.onLine) await syncPending();
+      else await load();
+    })();
+    const handleOnline = () => {
+      setOnline(true);
+      void syncPending();
+    };
+    const handleOffline = () => setOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
   }, []);
   const products = useMemo(
     () =>
@@ -106,13 +180,67 @@ export function PosPage() {
     setError("");
     setSuccess("");
     try {
-      const result = await api.createPosSale({
+      const operationId = crypto.randomUUID();
+      const saleInput = {
+        operationId,
+        createdAt: new Date().toISOString(),
+        expectedTotalCents: total,
         paymentMethod: payment,
         items: lines.map((l) => ({
           productId: l.product.id,
           quantity: l.quantity,
         })),
-      });
+      };
+      if (!online) {
+        if (!lastSync || Date.now() - lastSync > offlineLimitMs)
+          throw new Error("El período offline de 60 minutos expiró");
+        const queued: PendingSale = {
+          ...saleInput,
+          status: "pending",
+        };
+        await posOffline.putSale(queued);
+        const nextState = {
+          ...data!,
+          session: data!.session
+            ? {
+                ...data!.session,
+                totalOrders: data!.session.totalOrders + 1,
+                totalItems:
+                  data!.session.totalItems +
+                  saleInput.items.reduce((sum, item) => sum + item.quantity, 0),
+                cashOrders:
+                  data!.session.cashOrders + (payment === "cash" ? 1 : 0),
+                cardOrders:
+                  data!.session.cardOrders + (payment === "card" ? 1 : 0),
+                cashSalesCents:
+                  data!.session.cashSalesCents +
+                  (payment === "cash" ? total : 0),
+                cardSalesCents:
+                  data!.session.cardSalesCents +
+                  (payment === "card" ? total : 0),
+                expectedCashAmountCents:
+                  data!.session.expectedCashAmountCents +
+                  (payment === "cash" ? total : 0),
+              }
+            : null,
+          products: data!.products.map((product) => ({
+            ...product,
+            stock:
+              product.stock -
+              (saleInput.items.find((item) => item.productId === product.id)
+                ?.quantity ?? 0),
+          })),
+        };
+        setData(nextState);
+        await posOffline.saveSnapshot(nextState, lastSync);
+        setPendingSales(await posOffline.sales());
+        setCart({});
+        setSuccess(
+          "Venta guardada sin conexión. Se sincronizará automáticamente.",
+        );
+        return;
+      }
+      const result = await api.createPosSale(saleInput);
       setCart({});
       setSuccess(`Venta registrada por ${money(result.totalCents)}`);
       await load();
@@ -190,12 +318,14 @@ export function PosPage() {
         {data.session && (
           <div className="flex gap-2">
             <button
+              disabled={!online}
               onClick={() => void openOrders()}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black"
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black disabled:opacity-40"
             >
               Órdenes
             </button>
             <button
+              disabled={!online || pendingSales.length > 0}
               onClick={() => {
                 setClosing(true);
                 closeForm.reset({
@@ -204,13 +334,40 @@ export function PosPage() {
                     : 0,
                 });
               }}
-              className="rounded-xl border border-red-200 px-4 py-2 text-sm font-black text-red-700"
+              className="rounded-xl border border-red-200 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-40"
             >
               Cerrar caja
             </button>
           </div>
         )}
       </header>
+      <div
+        className={`flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm font-bold ${online ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
+      >
+        <span className="flex items-center gap-2">
+          {online ? <Wifi size={17} /> : <WifiOff size={17} />}
+          {syncing
+            ? "Sincronizando ventas…"
+            : online
+              ? "En línea"
+              : `Sin conexión · ${Math.max(0, Math.ceil((offlineLimitMs - (clock - lastSync)) / 60000))} min restantes`}
+        </span>
+        <button
+          disabled={!online || syncing || pendingSales.length === 0}
+          onClick={() => void syncPending()}
+          className="rounded-lg px-3 py-1 disabled:opacity-60"
+        >
+          {pendingSales.length} venta{pendingSales.length === 1 ? "" : "s"}{" "}
+          pendiente{pendingSales.length === 1 ? "" : "s"}
+        </button>
+      </div>
+      {pendingSales.some((sale) => sale.status === "conflict") && (
+        <div className="bg-red-50 px-4 py-2 text-sm font-bold text-red-700">
+          No se pudo sincronizar una venta:{" "}
+          {pendingSales.find((sale) => sale.status === "conflict")?.error}.
+          Revisa la conexión o los datos y vuelve a intentar.
+        </div>
+      )}
       {!data.session ? (
         <section className="mx-auto grid min-h-[calc(100vh-80px)] max-w-lg content-center p-5">
           <div className="rounded-3xl bg-white p-8 shadow-sm">
@@ -260,7 +417,7 @@ export function PosPage() {
                   <p className="mt-3 text-sm font-bold text-red-600">{error}</p>
                 )}
                 <button
-                  disabled={!data.locations.length}
+                  disabled={!online || !data.locations.length}
                   className="mt-5 w-full rounded-2xl bg-emerald-700 py-3 font-black text-white disabled:opacity-40"
                 >
                   Abrir caja
@@ -587,11 +744,12 @@ export function PosPage() {
                         </span>
                       ) : (
                         <button
+                          disabled={!online}
                           onClick={() => {
                             refundForm.reset({ notes: "" });
                             setRefunding(order);
                           }}
-                          className="rounded-xl bg-red-50 px-3 py-2 text-sm font-black text-red-700"
+                          className="rounded-xl bg-red-50 px-3 py-2 text-sm font-black text-red-700 disabled:opacity-40"
                         >
                           Reintegrar
                         </button>

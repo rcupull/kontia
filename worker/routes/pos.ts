@@ -52,6 +52,9 @@ posRoutes.post(
     "json",
     z.object({
       paymentMethod: z.enum(["cash", "card"]),
+      operationId: z.string().uuid(),
+      createdAt: z.string().datetime({ offset: true }),
+      expectedTotalCents: z.number().int().nonnegative(),
       items: z
         .array(
           z.object({
@@ -79,6 +82,8 @@ posRoutes.post(
         SESSION_REQUIRED: "Abre la caja antes de vender",
         PRODUCT_NOT_FOUND: "Producto no encontrado",
         INSUFFICIENT_STOCK: "No hay existencia suficiente",
+        PRICE_CHANGED: "Los precios cambiaron durante la desconexión",
+        OFFLINE_PERIOD_EXPIRED: "La venta excede el período offline permitido",
       };
       if (e instanceof Error && messages[e.message])
         return c.json({ error: messages[e.message] }, 409);

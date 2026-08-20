@@ -18,6 +18,7 @@ type AuthValue = {
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
+const cachedUserKey = "kontia-pos-user";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
@@ -33,6 +34,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ]);
       setSetupRequired(setup.required);
       setUser(session.user);
+    } catch {
+      if (window.location.pathname.startsWith("/pos")) {
+        const cached = localStorage.getItem(cachedUserKey);
+        try {
+          setUser(cached ? (JSON.parse(cached) as SessionUser) : null);
+        } catch {
+          localStorage.removeItem(cachedUserKey);
+          setUser(null);
+        }
+      } else setUser(null);
     } finally {
       setLoading(false);
     }
@@ -41,6 +52,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
   }, []);
+  useEffect(() => {
+    if (user) localStorage.setItem(cachedUserKey, JSON.stringify(user));
+    else if (navigator.onLine) localStorage.removeItem(cachedUserKey);
+  }, [user]);
   const value = useMemo(
     () => ({ loading, setupRequired, user, refresh, setUser }),
     [loading, setupRequired, user],
