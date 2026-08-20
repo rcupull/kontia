@@ -1,8 +1,15 @@
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Database, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Database,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import initSqlJs, { type Database as SqliteDatabase } from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { api } from "../api";
+import { posOffline } from "../posOffline";
 
 type Row = Record<string, unknown>;
 const sourceBusinessId = "46803d79-afbc-4606-8636-836af5469593";
@@ -208,6 +215,12 @@ export function MaintenancePage() {
     ReturnType<typeof api.importLitePos>
   > | null>(null);
   const [working, setWorking] = useState(false);
+  const [resetConfirmation, setResetConfirmation] = useState("");
+  const [resetWorking, setResetWorking] = useState(false);
+  const [resetError, setResetError] = useState("");
+  const [resetResult, setResetResult] = useState<Record<string, number> | null>(
+    null,
+  );
 
   async function importDatabase() {
     if (!file || !confirmed) return;
@@ -229,6 +242,27 @@ export function MaintenancePage() {
       setStatus("");
     } finally {
       setWorking(false);
+    }
+  }
+
+  async function resetOperations() {
+    if (resetConfirmation !== "REINICIAR OPERACIONES") return;
+    setResetWorking(true);
+    setResetError("");
+    setResetResult(null);
+    try {
+      const response = await api.resetOperations(resetConfirmation);
+      await posOffline.clear().catch(() => undefined);
+      setResetResult(response.deleted);
+      setResetConfirmation("");
+    } catch (reason) {
+      setResetError(
+        reason instanceof Error
+          ? reason.message
+          : "No se pudieron reiniciar las operaciones",
+      );
+    } finally {
+      setResetWorking(false);
     }
   }
 
@@ -322,6 +356,78 @@ export function MaintenancePage() {
           className="mt-6 rounded-2xl bg-emerald-700 px-6 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           {working ? "Importando..." : "Importar y reemplazar datos"}
+        </button>
+      </div>
+
+      <div className="mt-7 max-w-3xl rounded-3xl border border-red-200 bg-white p-7 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="rounded-2xl bg-red-50 p-3 text-red-700">
+            <Trash2 />
+          </div>
+          <div>
+            <h2 className="text-xl font-black">Reiniciar operaciones</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Vacía el historial operacional para comenzar nuevamente desde el
+              catálogo actual.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <p className="flex items-center gap-2 font-black">
+            <AlertTriangle size={18} /> Esta acción no se puede deshacer
+          </p>
+          <p className="mt-2">
+            Se eliminarán facturas, lotes, existencias, movimientos de
+            inventario, ventas, reintegros, sesiones de caja, finanzas y
+            auditoría.
+          </p>
+          <p className="mt-2 font-bold">
+            Se conservarán usuarios, negocio, productos, imágenes, categorías,
+            proveedores, ubicaciones y composiciones.
+          </p>
+        </div>
+
+        <label className="mt-6 block text-sm font-black">
+          Escribe REINICIAR OPERACIONES para confirmar
+          <input
+            value={resetConfirmation}
+            onChange={(event) => setResetConfirmation(event.target.value)}
+            autoComplete="off"
+            className="mt-2 block w-full rounded-2xl border border-slate-200 px-4 py-3 font-medium outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10"
+          />
+        </label>
+
+        {resetError && (
+          <p className="mt-5 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-700">
+            {resetError}
+          </p>
+        )}
+        {resetResult && (
+          <div className="mt-5 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-900">
+            <p className="flex items-center gap-2 font-black">
+              <CheckCircle2 size={18} /> Operaciones reiniciadas correctamente
+            </p>
+            <p className="mt-2">
+              Se eliminaron{" "}
+              {Object.values(resetResult).reduce(
+                (sum, count) => sum + count,
+                0,
+              )}{" "}
+              registros operacionales.
+            </p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={
+            resetConfirmation !== "REINICIAR OPERACIONES" || resetWorking
+          }
+          onClick={() => void resetOperations()}
+          className="mt-6 rounded-2xl bg-red-700 px-6 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {resetWorking ? "Reiniciando..." : "Eliminar operaciones"}
         </button>
       </div>
     </section>

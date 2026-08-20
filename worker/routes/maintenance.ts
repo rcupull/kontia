@@ -61,6 +61,52 @@ async function executeInChunks(
     await db.batch(statements.slice(index, index + 75));
 }
 
+maintenanceRoutes.post("/reset-operations", async (c) => {
+  const user = c.get("sessionUser");
+  if (user.role !== "owner")
+    return c.json(
+      { error: "Solo el propietario puede reiniciar las operaciones" },
+      403,
+    );
+  const payload = (await c.req.json().catch(() => null)) as {
+    confirmation?: string;
+  } | null;
+  if (payload?.confirmation !== "REINICIAR OPERACIONES")
+    return c.json(
+      { error: "Escribe REINICIAR OPERACIONES para confirmar" },
+      400,
+    );
+
+  const tables = [
+    "audit_logs",
+    "financial_movements",
+    "inventory_movements",
+    "sale_refunds",
+    "sale_items",
+    "sales",
+    "cash_sessions",
+    "inventory_batch_stocks",
+    "inventory_batches",
+    "supplier_invoices",
+  ] as const;
+  const results = await c.env.DB.batch(
+    tables.map((table) =>
+      c.env.DB.prepare(`DELETE FROM ${table} WHERE business_id=?`).bind(
+        user.businessId,
+      ),
+    ),
+  );
+  return c.json({
+    ok: true,
+    deleted: Object.fromEntries(
+      tables.map((table, index) => [
+        table,
+        Number(results[index]?.meta.changes ?? 0),
+      ]),
+    ),
+  });
+});
+
 maintenanceRoutes.post("/import-litepos", async (c) => {
   const user = c.get("sessionUser");
   if (user.role !== "owner")

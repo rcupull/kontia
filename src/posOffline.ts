@@ -61,6 +61,12 @@ export const posOffline = {
     useStore<PendingSale[]>(outboxStore, "readonly", (store) => store.getAll()),
   removeSale: (operationId: string) =>
     useStore(outboxStore, "readwrite", (store) => store.delete(operationId)),
+  clear: async () => {
+    await Promise.all([
+      useStore(snapshotStore, "readwrite", (store) => store.clear()),
+      useStore(outboxStore, "readwrite", (store) => store.clear()),
+    ]);
+  },
 };
 
 export const offlineLimitMs = 60 * 60 * 1000;

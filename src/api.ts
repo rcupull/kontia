@@ -248,6 +248,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  resetOperations: (confirmation: string) =>
+    request<{ ok: boolean; deleted: Record<string, number> }>(
+      "/api/maintenance/reset-operations",
+      {
+        method: "POST",
+        body: JSON.stringify({ confirmation }),
+      },
+    ),
   adminSales: (search = "") =>
     request<{ sales: Sale[] }>(
       `/api/admin-data/sales?search=${encodeURIComponent(search)}`,
