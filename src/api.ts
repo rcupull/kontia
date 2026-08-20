@@ -2,6 +2,7 @@ import type {
   Category,
   InventoryBatch,
   InventoryMovement,
+  InvoiceReconciliationMovement,
   Location,
   Sale,
   CashSession,
@@ -168,6 +169,10 @@ export const api = {
   supplierInvoices: (search = "") =>
     request<{ invoices: SupplierInvoice[] }>(
       `/api/supplier-invoices?search=${encodeURIComponent(search)}`,
+    ),
+  supplierInvoiceReconciliation: (id: string) =>
+    request<{ movements: InvoiceReconciliationMovement[] }>(
+      `/api/supplier-invoices/${id}/reconciliation`,
     ),
   createSupplierInvoice: (input: {
     supplierId: string;

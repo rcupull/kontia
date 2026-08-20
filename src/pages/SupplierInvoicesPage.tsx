@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
-import { FileText, Pencil, Plus, Search, X } from "lucide-react";
+import { Eye, FileText, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
 import {
   FieldDateTimePicker,
@@ -8,7 +8,11 @@ import {
   FieldSelect,
   FieldTextarea,
 } from "../components/fields";
-import type { Supplier, SupplierInvoice } from "../types";
+import type {
+  InvoiceReconciliationMovement,
+  Supplier,
+  SupplierInvoice,
+} from "../types";
 
 const money = (cents: number) =>
   new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
@@ -29,6 +33,10 @@ export function SupplierInvoicesPage() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SupplierInvoice | null>(null);
+  const [details, setDetails] = useState<{
+    invoice: SupplierInvoice;
+    movements: InvoiceReconciliationMovement[];
+  } | null>(null);
   const [error, setError] = useState("");
   const methods = useForm<{
     supplierId: string;
@@ -83,6 +91,19 @@ export function SupplierInvoicesPage() {
           },
     );
     setOpen(true);
+  }
+  async function showReconciliation(invoice: SupplierInvoice) {
+    setError("");
+    try {
+      const result = await api.supplierInvoiceReconciliation(invoice.id);
+      setDetails({ invoice, movements: result.movements });
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "No se pudo cargar la conciliación",
+      );
+    }
   }
   async function submit(values: {
     supplierId: string;
@@ -163,28 +184,53 @@ export function SupplierInvoicesPage() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((invoice) => (
-                <tr key={invoice.id} className="border-t border-slate-100">
-                  <td className="px-5 py-4 font-black">
-                    {invoice.invoiceNumber}
-                  </td>
-                  <td className="font-bold">{invoice.supplierName}</td>
-                  <td>{invoice.invoiceDate}</td>
-                  <td className="font-black">
-                    {money(invoice.totalAmountCents)}
-                  </td>
-                  <td>{invoice.batchCount}</td>
-                  <td className="px-5 text-right">
-                    <button
-                      onClick={() => showForm(invoice)}
-                      className="rounded-xl border border-slate-200 p-2 hover:bg-slate-50"
-                      aria-label={`Editar factura ${invoice.invoiceNumber}`}
-                    >
-                      <Pencil size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {visible.map((invoice) => {
+                const difference =
+                  invoice.totalAmountCents - invoice.batchesTotalCents;
+                const reconciled = !invoice.hasInvalidCosts && difference === 0;
+                return (
+                  <tr
+                    key={invoice.id}
+                    className="border-t border-slate-100 align-top"
+                  >
+                    <td className="px-5 py-4 font-black">
+                      {invoice.invoiceNumber}
+                    </td>
+                    <td className="font-bold">{invoice.supplierName}</td>
+                    <td>{invoice.invoiceDate}</td>
+                    <td className="py-3">
+                      <p
+                        className={`font-black ${reconciled ? "text-emerald-700" : "text-red-700"}`}
+                      >
+                        {money(invoice.totalAmountCents)}
+                      </p>
+                      {!reconciled && (
+                        <div className="mt-1 text-xs font-bold text-red-600">
+                          <p>Lotes: {money(invoice.batchesTotalCents)}</p>
+                          <p>Diferencia: {money(difference)}</p>
+                          <button
+                            type="button"
+                            onClick={() => void showReconciliation(invoice)}
+                            className="mt-1 inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-1 hover:bg-red-100"
+                          >
+                            <Eye size={14} /> Ver detalles
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td>{invoice.batchCount}</td>
+                    <td className="px-5 text-right">
+                      <button
+                        onClick={() => showForm(invoice)}
+                        className="rounded-xl border border-slate-200 p-2 hover:bg-slate-50"
+                        aria-label={`Editar factura ${invoice.invoiceNumber}`}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -288,6 +334,115 @@ export function SupplierInvoicesPage() {
               </div>
             </form>
           </FormProvider>
+        </div>
+      )}
+      {details && (
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/45 p-4">
+          <div className="mx-auto my-10 w-full max-w-5xl rounded-[2rem] bg-white p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-black">
+                  Detalles de conciliación
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Factura {details.invoice.invoiceNumber} ·{" "}
+                  {details.invoice.supplierName}
+                </p>
+              </div>
+              <button type="button" onClick={() => setDetails(null)}>
+                <X />
+              </button>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs font-black uppercase text-slate-400">
+                  Monto factura
+                </p>
+                <p className="mt-1 text-xl font-black">
+                  {money(details.invoice.totalAmountCents)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs font-black uppercase text-slate-400">
+                  Monto en lotes
+                </p>
+                <p className="mt-1 text-xl font-black">
+                  {money(details.invoice.batchesTotalCents)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-red-50 p-4">
+                <p className="text-xs font-black uppercase text-red-500">
+                  Diferencia
+                </p>
+                <p className="mt-1 text-xl font-black text-red-700">
+                  {money(
+                    details.invoice.totalAmountCents -
+                      details.invoice.batchesTotalCents,
+                  )}
+                </p>
+              </div>
+            </div>
+            {!!details.invoice.hasInvalidCosts && (
+              <p className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-black text-red-700">
+                Hay lotes sin un costo válido. Revisa su costo unitario.
+              </p>
+            )}
+            <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full min-w-[780px] text-left">
+                <thead className="text-xs uppercase text-slate-400">
+                  <tr>
+                    <th className="px-4 py-3">Fecha</th>
+                    <th>Producto</th>
+                    <th>Lote</th>
+                    <th>Movimiento</th>
+                    <th>Cantidad</th>
+                    <th>Costo unitario</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {details.movements.map((movement) => (
+                    <tr key={movement.id} className="border-t">
+                      <td className="px-4 py-3">
+                        {new Date(movement.createdAt).toLocaleString("es")}
+                      </td>
+                      <td className="font-black">{movement.productName}</td>
+                      <td>
+                        <p className="font-mono text-xs">
+                          {movement.batchId.slice(0, 8)}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {new Date(movement.receivedAt).toLocaleDateString(
+                            "es",
+                          )}
+                        </p>
+                      </td>
+                      <td>
+                        {movement.movementType === "purchase"
+                          ? "Compra"
+                          : movement.movementType === "positiveAdjustment"
+                            ? "Ajuste positivo"
+                            : "Ajuste negativo"}
+                      </td>
+                      <td className="font-bold">{movement.quantity}</td>
+                      <td>{money(movement.unitCostCents)}</td>
+                      <td
+                        className={`font-black ${movement.totalCostCents < 0 ? "text-red-700" : ""}`}
+                      >
+                        {money(movement.totalCostCents)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!details.movements.length && (
+                <p className="p-10 text-center font-bold text-slate-400">
+                  No hay compras o ajustes asociados a los lotes de esta
+                  factura.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </section>

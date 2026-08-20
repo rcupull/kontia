@@ -54,6 +54,21 @@ export type SupplierInvoice = {
   totalAmountCents: number;
   notes?: string;
   batchCount: number;
+  batchesTotalCents: number;
+  hasInvalidCosts: number;
+};
+
+export type InvoiceReconciliationMovement = {
+  id: string;
+  createdAt: string;
+  movementType: "purchase" | "positiveAdjustment" | "negativeAdjustment";
+  quantity: number;
+  batchId: string;
+  receivedAt: string;
+  unitCostCents: number;
+  productId: string;
+  productName: string;
+  totalCostCents: number;
 };
 
 export type Category = {
