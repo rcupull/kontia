@@ -71,19 +71,21 @@ export function AdminLayout() {
         </button>
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-        {sections.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            onClick={() => setOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${isActive ? "bg-emerald-500 text-white" : "text-emerald-50/70 hover:bg-white/10 hover:text-white"}`
-            }
-          >
-            <Icon size={18} />
-            {label}
-          </NavLink>
-        ))}
+        {sections
+          .filter(({ to }) => to !== "/admin/users" || user?.role === "owner")
+          .map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${isActive ? "bg-emerald-500 text-white" : "text-emerald-50/70 hover:bg-white/10 hover:text-white"}`
+              }
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
       </nav>
     </>
   );

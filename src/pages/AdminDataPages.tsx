@@ -103,10 +103,8 @@ function Empty({ text }: { text: string }) {
   return <p className="p-12 text-center font-bold text-slate-400">{text}</p>;
 }
 
-export function DashboardPage() {
-  const [data, setData] = useState<Awaited<
-    ReturnType<typeof api.dashboard>
-  > | null>(null);
+function LegacyDashboardPage() {
+  const [data, setData] = useState<any>(null);
   useEffect(() => {
     void api.dashboard().then(setData);
   }, []);
@@ -164,7 +162,7 @@ export function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {data.recentSales.map((s) => (
+              {data.recentSales.map((s: any) => (
                 <tr key={s.id} className="border-t border-slate-100">
                   <td className="px-5 py-4">{date(s.createdAt)}</td>
                   <td>{s.sellerName}</td>

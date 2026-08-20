@@ -99,39 +99,313 @@ export class AdminRepository {
     return nextId;
   }
 
-  async dashboard(businessId: string) {
-    const [sales, inventory, finance, products] = await Promise.all([
+  async dashboard(businessId: string, from?: string, to?: string) {
+    const range = (column: string) =>
+      `(? IS NULL OR datetime(${column}) >= datetime(?)) AND (? IS NULL OR datetime(${column}) <= datetime(?))`;
+    const bindRange = (statement: D1PreparedStatement) =>
+      statement.bind(
+        businessId,
+        from ?? null,
+        from ?? null,
+        to ?? null,
+        to ?? null,
+      );
+    const [
+      business,
+      saleRows,
+      refundRows,
+      wasteRows,
+      expenseRows,
+      financeRows,
+      financeBalances,
+      inventoryRows,
+    ] = await Promise.all([
       this.db
         .prepare(
-          `SELECT COUNT(*) AS orders,COALESCE(SUM(CASE WHEN r.id IS NULL THEN s.total_cents ELSE 0 END),0) AS salesCents,COALESCE(SUM(CASE WHEN r.id IS NOT NULL THEN s.total_cents ELSE 0 END),0) AS refundsCents FROM sales s LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL WHERE s.business_id=? AND s.deleted_at IS NULL`,
+          `SELECT sales_tax_percentage AS tax FROM businesses WHERE id=?`,
         )
         .bind(businessId)
-        .first(),
+        .first<{ tax: number }>(),
+      bindRange(
+        this.db.prepare(`
+            SELECT date(s.created_at) AS day,p.id AS productId,p.name AS productName,s.payment_method AS paymentMethod,
+              COUNT(DISTINCT s.id) AS orders,SUM(si.quantity) AS units,SUM(si.total_cents) AS grossCents,
+              SUM(si.quantity*b.unit_cost_cents) AS costCents
+            FROM sales s JOIN sale_items si ON si.sale_id=s.id AND si.deleted_at IS NULL
+            JOIN products p ON p.id=si.product_id LEFT JOIN inventory_batches b ON b.id=si.batch_id
+            WHERE s.business_id=? AND s.deleted_at IS NULL AND ${range("s.created_at")}
+            GROUP BY day,p.id,s.payment_method`),
+      ).all<Record<string, unknown>>(),
+      bindRange(
+        this.db.prepare(`
+            SELECT date(r.created_at) AS day,p.id AS productId,p.name AS productName,s.payment_method AS paymentMethod,
+              COUNT(DISTINCT r.id) AS refunds,SUM(si.quantity) AS units,SUM(si.total_cents) AS refundCents,
+              SUM(si.quantity*b.unit_cost_cents) AS costCents
+            FROM sale_refunds r JOIN sales s ON s.id=r.sale_id AND s.deleted_at IS NULL
+            JOIN sale_items si ON si.sale_id=s.id AND si.deleted_at IS NULL JOIN products p ON p.id=si.product_id
+            LEFT JOIN inventory_batches b ON b.id=si.batch_id
+            WHERE r.business_id=? AND r.deleted_at IS NULL AND ${range("r.created_at")}
+            GROUP BY day,p.id,s.payment_method`),
+      ).all<Record<string, unknown>>(),
+      bindRange(
+        this.db.prepare(`
+            SELECT date(m.created_at) AS day,p.id AS productId,p.name AS productName,l.type AS locationType,
+              SUM(m.quantity) AS units,SUM(m.quantity*b.unit_cost_cents) AS lossCents
+            FROM inventory_movements m JOIN inventory_batches b ON b.id=m.batch_id JOIN products p ON p.id=m.product_id
+            LEFT JOIN locations l ON l.id=m.source_location_id
+            WHERE m.business_id=? AND m.deleted_at IS NULL AND m.movement_type='waste' AND ${range("m.created_at")}
+            GROUP BY day,p.id,l.type`),
+      ).all<Record<string, unknown>>(),
+      bindRange(
+        this.db.prepare(`
+            SELECT date(movement_date) AS day,expense_type AS expenseType,SUM(amount_cents) AS amountCents
+            FROM financial_movements WHERE business_id=? AND deleted_at IS NULL AND type='operatingExpense'
+              AND ${range("movement_date")} GROUP BY day,expense_type`),
+      ).all<Record<string, unknown>>(),
+      bindRange(
+        this.db.prepare(`
+            SELECT date(movement_date) AS day,type,money_location AS moneyLocation,SUM(amount_cents) AS amountCents
+            FROM financial_movements WHERE business_id=? AND deleted_at IS NULL AND ${range("movement_date")}
+            GROUP BY day,type,money_location`),
+      ).all<Record<string, unknown>>(),
       this.db
         .prepare(
-          `SELECT COALESCE(SUM(bs.quantity),0) AS units,COALESCE(SUM(bs.quantity*b.unit_cost_cents),0) AS costCents FROM inventory_batch_stocks bs JOIN inventory_batches b ON b.id=bs.batch_id WHERE bs.business_id=? AND b.deleted_at IS NULL`,
+          `
+            SELECT money_location AS moneyLocation,
+              SUM(CASE WHEN type IN ('capitalInjection','sessionClose','positiveAdjustment') THEN amount_cents ELSE -amount_cents END) AS balanceCents
+            FROM financial_movements WHERE business_id=? AND deleted_at IS NULL GROUP BY money_location`,
         )
         .bind(businessId)
-        .first(),
+        .all<Record<string, unknown>>(),
       this.db
         .prepare(
-          `SELECT COALESCE(SUM(CASE WHEN type IN ('capitalInjection','sessionClose','positiveAdjustment') THEN amount_cents ELSE -amount_cents END),0) AS balanceCents FROM financial_movements WHERE business_id=? AND deleted_at IS NULL`,
+          `
+            SELECT l.id,l.name,l.type,COALESCE(SUM(bs.quantity),0) AS units,
+              COALESCE(SUM(bs.quantity*b.unit_cost_cents),0) AS valueCents
+            FROM locations l LEFT JOIN inventory_batch_stocks bs ON bs.location_id=l.id
+            LEFT JOIN inventory_batches b ON b.id=bs.batch_id AND b.deleted_at IS NULL
+            WHERE l.business_id=? AND l.deleted_at IS NULL AND l.is_active=1 GROUP BY l.id ORDER BY l.type,l.name`,
         )
         .bind(businessId)
-        .first(),
-      this.db
-        .prepare(
-          `SELECT COUNT(*) AS products FROM products WHERE business_id=? AND deleted_at IS NULL AND is_active=1`,
-        )
-        .bind(businessId)
-        .first(),
+        .all<Record<string, unknown>>(),
     ]);
-    const recent = await this.db
-      .prepare(
-        `SELECT s.id,s.created_at AS createdAt,s.total_cents AS totalCents,s.payment_method AS paymentMethod,u.display_name AS sellerName FROM sales s JOIN users u ON u.id=s.seller_id WHERE s.business_id=? AND s.deleted_at IS NULL ORDER BY s.created_at DESC LIMIT 8`,
-      )
-      .bind(businessId)
-      .all();
-    return { sales, inventory, finance, products, recentSales: recent.results };
+
+    type Metrics = {
+      grossSales: number;
+      netSales: number;
+      refunds: number;
+      grossCashSales: number;
+      netCashSales: number;
+      cashRefunds: number;
+      grossTransferSales: number;
+      netTransferSales: number;
+      transferRefunds: number;
+      cost: number;
+      profit: number;
+      expenses: number;
+      wasteLoss: number;
+      operatingResult: number;
+      orders: number;
+      units: number;
+    };
+    const empty = (): Metrics => ({
+      grossSales: 0,
+      netSales: 0,
+      refunds: 0,
+      grossCashSales: 0,
+      netCashSales: 0,
+      cashRefunds: 0,
+      grossTransferSales: 0,
+      netTransferSales: 0,
+      transferRefunds: 0,
+      cost: 0,
+      profit: 0,
+      expenses: 0,
+      wasteLoss: 0,
+      operatingResult: 0,
+      orders: 0,
+      units: 0,
+    });
+    const totals = empty(),
+      daily: Record<string, Metrics> = {},
+      products: Record<
+        string,
+        Metrics & { productId: string; productName: string }
+      > = {};
+    const metricFor = (day: string, productId: string, productName: string) => {
+      daily[day] ??= empty();
+      products[productId] ??= { ...empty(), productId, productName };
+      return [totals, daily[day], products[productId]];
+    };
+    const taxRate = Number(business?.tax ?? 15) / 100;
+    for (const row of saleRows.results) {
+      const values = metricFor(
+        String(row.day),
+        String(row.productId),
+        String(row.productName),
+      );
+      const gross = Number(row.grossCents ?? 0),
+        cost = Number(row.costCents ?? 0);
+      for (const value of values) {
+        value.grossSales += gross;
+        value.netSales += gross;
+        value.cost += cost;
+        value.profit += gross - gross * taxRate - cost;
+        value.orders += Number(row.orders ?? 0);
+        value.units += Number(row.units ?? 0);
+        if (row.paymentMethod === "cash") {
+          value.grossCashSales += gross;
+          value.netCashSales += gross;
+        } else {
+          value.grossTransferSales += gross;
+          value.netTransferSales += gross;
+        }
+      }
+    }
+    for (const row of refundRows.results) {
+      const values = metricFor(
+        String(row.day),
+        String(row.productId),
+        String(row.productName),
+      );
+      const refund = Number(row.refundCents ?? 0),
+        cost = Number(row.costCents ?? 0);
+      for (const value of values) {
+        value.refunds += refund;
+        value.netSales -= refund;
+        value.cost -= cost;
+        value.profit -= refund - refund * taxRate - cost;
+        if (row.paymentMethod === "cash") {
+          value.cashRefunds += refund;
+          value.netCashSales -= refund;
+        } else {
+          value.transferRefunds += refund;
+          value.netTransferSales -= refund;
+        }
+      }
+    }
+    for (const row of wasteRows.results) {
+      const values = metricFor(
+        String(row.day),
+        String(row.productId),
+        String(row.productName),
+      );
+      for (const value of values) value.wasteLoss += Number(row.lossCents ?? 0);
+    }
+    for (const row of expenseRows.results) {
+      const day = String(row.day);
+      daily[day] ??= empty();
+      totals.expenses += Number(row.amountCents ?? 0);
+      daily[day].expenses += Number(row.amountCents ?? 0);
+    }
+    for (const value of [
+      totals,
+      ...Object.values(daily),
+      ...Object.values(products),
+    ])
+      value.operatingResult = value.profit - value.expenses - value.wasteLoss;
+
+    const incoming = new Set([
+      "capitalInjection",
+      "sessionClose",
+      "positiveAdjustment",
+    ]);
+    const financeSummary = {
+      cashBalance: 0,
+      bankBalance: 0,
+      totalBalance: 0,
+      totalIn: 0,
+      totalOut: 0,
+      netMovement: 0,
+      operatingExpenses: 0,
+      inventoryReinvestment: 0,
+      ownerWithdrawals: 0,
+      saleRefunds: 0,
+    };
+    for (const row of financeBalances.results) {
+      if (row.moneyLocation === "cashDeposit")
+        financeSummary.cashBalance += Number(row.balanceCents ?? 0);
+      else financeSummary.bankBalance += Number(row.balanceCents ?? 0);
+    }
+    financeSummary.totalBalance =
+      financeSummary.cashBalance + financeSummary.bankBalance;
+    const financeDaily: Record<
+      string,
+      { in: number; out: number; net: number }
+    > = {};
+    const financeByType: Record<string, number> = {},
+      expensesByType: Record<string, number> = {};
+    for (const row of financeRows.results) {
+      const amount = Number(row.amountCents ?? 0),
+        type = String(row.type),
+        day = String(row.day);
+      const isIn = incoming.has(type);
+      financeDaily[day] ??= { in: 0, out: 0, net: 0 };
+      if (isIn) {
+        financeSummary.totalIn += amount;
+        financeDaily[day].in += amount;
+        financeDaily[day].net += amount;
+      } else {
+        financeSummary.totalOut += amount;
+        financeDaily[day].out += amount;
+        financeDaily[day].net -= amount;
+      }
+      financeByType[type] = (financeByType[type] ?? 0) + amount;
+      if (type === "inventoryReinvestment")
+        financeSummary.inventoryReinvestment += amount;
+      if (type === "ownerWithdrawal") financeSummary.ownerWithdrawals += amount;
+      if (type === "saleRefund") financeSummary.saleRefunds += amount;
+    }
+    financeSummary.operatingExpenses = totals.expenses;
+    financeSummary.netMovement =
+      financeSummary.totalIn - financeSummary.totalOut;
+    for (const row of expenseRows.results) {
+      const type = String(row.expenseType || "other");
+      expensesByType[type] =
+        (expensesByType[type] ?? 0) + Number(row.amountCents ?? 0);
+    }
+    const inventory = inventoryRows.results.map((row) => ({
+      ...row,
+      units: Number(row.units ?? 0),
+      valueCents: Number(row.valueCents ?? 0),
+    }));
+    const waste = wasteRows.results.reduce<{
+      warehouseCents: number;
+      posCents: number;
+    }>(
+      (acc, row) => {
+        const key =
+          row.locationType === "point_of_sale" ? "posCents" : "warehouseCents";
+        acc[key] += Number(row.lossCents ?? 0);
+        return acc;
+      },
+      { warehouseCents: 0, posCents: 0 },
+    );
+    return {
+      range: { from: from ?? null, to: to ?? null },
+      totals,
+      daily: Object.entries(daily)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([day, values]) => ({ day, ...values })),
+      products: Object.values(products).sort((a, b) => b.netSales - a.netSales),
+      finance: {
+        summary: financeSummary,
+        daily: Object.entries(financeDaily)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([day, values]) => ({ day, ...values })),
+        byType: financeByType,
+        expensesByType,
+      },
+      inventory: {
+        locations: inventory,
+        totalUnits: inventory.reduce((sum, row) => sum + row.units, 0),
+        totalValueCents: inventory.reduce(
+          (sum, row) => sum + row.valueCents,
+          0,
+        ),
+        ...waste,
+        totalWasteCents: waste.warehouseCents + waste.posCents,
+      },
+    };
   }
 }

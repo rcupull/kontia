@@ -9,6 +9,7 @@ import { locationRoutes } from "./routes/locations";
 import { maintenanceRoutes } from "./routes/maintenance";
 import { adminRoutes } from "./routes/admin";
 import { posRoutes } from "./routes/pos";
+import { userRoutes } from "./routes/users";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -34,6 +35,7 @@ for (const resource of [
   "maintenance",
   "admin-data",
   "pos",
+  "users",
 ]) {
   app.use(`/api/${resource}`, requireSession);
   app.use(`/api/${resource}/*`, requireSession);
@@ -48,5 +50,6 @@ app.route("/api/locations", locationRoutes);
 app.route("/api/maintenance", maintenanceRoutes);
 app.route("/api/admin-data", adminRoutes);
 app.route("/api/pos", posRoutes);
+app.route("/api/users", userRoutes);
 
 export default app;

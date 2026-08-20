@@ -11,9 +11,10 @@ import { SuppliersPage } from "./pages/SuppliersPage";
 import { LocationsPage } from "./pages/LocationsPage";
 import { MaintenancePage } from "./pages/MaintenancePage";
 import { PosPage } from "./pages/PosPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { UsersPage } from "./pages/UsersPage";
 import {
   CashSessionsPage,
-  DashboardPage,
   FinancialMovementsPage,
   SalesPage,
 } from "./pages/AdminDataPages";
@@ -53,15 +54,7 @@ export default function App() {
           path="financial-movements"
           element={<FinancialMovementsPage />}
         />
-        <Route
-          path="users"
-          element={
-            <PlaceholderPage
-              title="Usuarios"
-              description="Usuarios, roles, permisos y estado de acceso."
-            />
-          }
-        />
+        <Route path="users" element={<UsersPage />} />
         <Route
           path="businesses"
           element={

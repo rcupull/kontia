@@ -14,6 +14,15 @@ const money = (cents: number) =>
   new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
     cents / 100,
   );
+
+function generateInvoiceNumber() {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const random = Math.floor(100 + Math.random() * 900);
+  return `${day}${month}${random}`;
+}
+
 export function SupplierInvoicesPage() {
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -67,7 +76,7 @@ export function SupplierInvoicesPage() {
           }
         : {
             supplierId: "",
-            invoiceNumber: "",
+            invoiceNumber: generateInvoiceNumber(),
             invoiceDate: new Date().toISOString().slice(0, 10),
             totalAmount: 0,
             notes: "",

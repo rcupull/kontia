@@ -5,6 +5,16 @@ export type SessionUser = {
   role: "owner" | "manager" | "seller";
 };
 
+export type BusinessUser = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: "owner" | "manager" | "seller";
+  isActive: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Product = {
   id: string;
   sku: string | null;

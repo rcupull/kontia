@@ -80,6 +80,8 @@ adminRoutes.get("/dashboard", async (c) =>
   c.json(
     await new AdminRepository(c.env.DB).dashboard(
       c.get("sessionUser").businessId,
+      c.req.query("from"),
+      c.req.query("to"),
     ),
   ),
 );

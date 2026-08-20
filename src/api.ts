@@ -10,7 +10,27 @@ import type {
   SessionUser,
   Supplier,
   SupplierInvoice,
+  BusinessUser,
 } from "./types";
+
+export type DashboardMetrics = {
+  grossSales: number;
+  netSales: number;
+  refunds: number;
+  grossCashSales: number;
+  netCashSales: number;
+  cashRefunds: number;
+  grossTransferSales: number;
+  netTransferSales: number;
+  transferRefunds: number;
+  cost: number;
+  profit: number;
+  expenses: number;
+  wasteLoss: number;
+  operatingResult: number;
+  orders: number;
+  units: number;
+};
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -45,6 +65,34 @@ export const api = {
   logout: () =>
     request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   session: () => request<{ user: SessionUser | null }>("/api/auth/session"),
+  users: (search = "") =>
+    request<{ users: BusinessUser[] }>(
+      `/api/users?${new URLSearchParams({ search })}`,
+    ),
+  createUser: (input: {
+    username: string;
+    displayName: string;
+    role: "manager" | "seller";
+    password: string;
+  }) =>
+    request<{ id: string }>("/api/users", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateUser: (
+    id: string,
+    input: {
+      username: string;
+      displayName: string;
+      role: "manager" | "seller";
+      password?: string;
+      isActive: boolean;
+    },
+  ) =>
+    request<{ ok: boolean }>(`/api/users/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
   products: () => request<{ products: Product[] }>("/api/products"),
   categories: () => request<{ categories: Category[] }>("/api/categories"),
   createCategory: (name: string) =>
@@ -228,20 +276,48 @@ export const api = {
       id ? `/api/admin-data/financial/${id}` : "/api/admin-data/financial",
       { method: id ? "PUT" : "POST", body: JSON.stringify(input) },
     ),
-  dashboard: () =>
+  dashboard: (from?: string, to?: string) =>
     request<{
-      sales: { orders: number; salesCents: number; refundsCents: number };
-      inventory: { units: number; costCents: number };
-      finance: { balanceCents: number };
-      products: { products: number };
-      recentSales: Array<{
-        id: string;
-        createdAt: string;
-        totalCents: number;
-        paymentMethod: string;
-        sellerName: string;
-      }>;
-    }>("/api/admin-data/dashboard"),
+      range: { from: string | null; to: string | null };
+      totals: DashboardMetrics;
+      daily: Array<{ day: string } & DashboardMetrics>;
+      products: Array<
+        { productId: string; productName: string } & DashboardMetrics
+      >;
+      finance: {
+        summary: {
+          cashBalance: number;
+          bankBalance: number;
+          totalBalance: number;
+          totalIn: number;
+          totalOut: number;
+          netMovement: number;
+          operatingExpenses: number;
+          inventoryReinvestment: number;
+          ownerWithdrawals: number;
+          saleRefunds: number;
+        };
+        daily: Array<{ day: string; in: number; out: number; net: number }>;
+        byType: Record<string, number>;
+        expensesByType: Record<string, number>;
+      };
+      inventory: {
+        locations: Array<{
+          id: string;
+          name: string;
+          type: "warehouse" | "point_of_sale";
+          units: number;
+          valueCents: number;
+        }>;
+        totalUnits: number;
+        totalValueCents: number;
+        warehouseCents: number;
+        posCents: number;
+        totalWasteCents: number;
+      };
+    }>(
+      `/api/admin-data/dashboard?${new URLSearchParams({ ...(from && { from }), ...(to && { to }) })}`,
+    ),
   posState: () =>
     request<{
       locations: Array<{ id: string; name: string }>;
