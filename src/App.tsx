@@ -10,6 +10,7 @@ import { SupplierInvoicesPage } from "./pages/SupplierInvoicesPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { LocationsPage } from "./pages/LocationsPage";
 import { MaintenancePage } from "./pages/MaintenancePage";
+import { PosPage } from "./pages/PosPage";
 import {
   CashSessionsPage,
   DashboardPage,
@@ -81,15 +82,7 @@ export default function App() {
           }
         />
       </Route>
-      <Route
-        path="/pos"
-        element={
-          <PlaceholderPage
-            title="Punto de venta"
-            description="El nuevo POS conectado a D1 será el siguiente bloque operativo."
-          />
-        }
-      />
+      <Route path="/pos" element={<PosPage />} />
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
   );

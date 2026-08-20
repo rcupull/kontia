@@ -242,6 +242,85 @@ export const api = {
         sellerName: string;
       }>;
     }>("/api/admin-data/dashboard"),
+  posState: () =>
+    request<{
+      locations: Array<{ id: string; name: string }>;
+      session: {
+        id: string;
+        locationId: string;
+        locationName: string;
+        openingAmountCents: number;
+        expectedCashAmountCents: number;
+        openedAt: string;
+        totalOrders: number;
+        totalItems: number;
+        cashOrders: number;
+        cardOrders: number;
+        cashSalesCents: number;
+        cardSalesCents: number;
+        cashRefundsCents: number;
+        cardRefundsCents: number;
+      } | null;
+      products: Array<{
+        id: string;
+        name: string;
+        imageId?: string;
+        categoryName?: string;
+        stock: number;
+        cashPriceCents: number;
+        cardPriceCents: number;
+      }>;
+    }>("/api/pos/state"),
+  openPosSession: (locationId: string, openingAmountCents: number) =>
+    request<{
+      session: {
+        id: string;
+        locationId: string;
+        locationName: string;
+        openingAmountCents: number;
+        expectedCashAmountCents: number;
+        openedAt: string;
+      };
+    }>("/api/pos/sessions", {
+      method: "POST",
+      body: JSON.stringify({ locationId, openingAmountCents }),
+    }),
+  createPosSale: (input: {
+    paymentMethod: "cash" | "card";
+    items: Array<{ productId: string; quantity: number }>;
+  }) =>
+    request<{ id: string; totalCents: number }>("/api/pos/sales", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  posOrders: () =>
+    request<{
+      orders: Array<{
+        id: string;
+        paymentMethod: "cash" | "card";
+        totalCents: number;
+        createdAt: string;
+        refundId?: string;
+        refundNotes?: string;
+        items: Array<{
+          id: string;
+          productName: string;
+          quantity: number;
+          unitPriceCents: number;
+          totalCents: number;
+        }>;
+      }>;
+    }>("/api/pos/orders"),
+  refundPosOrder: (id: string, notes?: string) =>
+    request<{ id: string }>(`/api/pos/orders/${id}/refund`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    }),
+  closePosSession: (countedCashAmountCents: number) =>
+    request<{ expectedCashAmountCents: number; differenceCents: number }>(
+      "/api/pos/sessions/close",
+      { method: "POST", body: JSON.stringify({ countedCashAmountCents }) },
+    ),
   locations: (search = "") =>
     request<{ locations: Location[] }>(
       `/api/locations?search=${encodeURIComponent(search)}`,

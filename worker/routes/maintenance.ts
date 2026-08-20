@@ -78,10 +78,12 @@ maintenanceRoutes.post("/import-litepos", async (c) => {
   const db = c.env.DB;
   const businessId = user.businessId;
   let warehouseId = "";
+  let posId = "";
   let uncategorizedId = "";
 
   if (payload.mode === "replace") {
     warehouseId = crypto.randomUUID();
+    posId = crypto.randomUUID();
     uncategorizedId = crypto.randomUUID();
     await executeInChunks(
       db,
@@ -126,6 +128,11 @@ maintenanceRoutes.post("/import-litepos", async (c) => {
         .bind(warehouseId, businessId),
       db
         .prepare(
+          `INSERT INTO locations (id,business_id,code,name,type) VALUES (?,?,'POS-01','Punto de venta principal','point_of_sale')`,
+        )
+        .bind(posId, businessId),
+      db
+        .prepare(
           `INSERT INTO categories (id,business_id,name,created_at,updated_at) VALUES (?,?,'Sin categoría',datetime('now'),datetime('now'))`,
         )
         .bind(uncategorizedId, businessId),
@@ -143,9 +150,16 @@ maintenanceRoutes.post("/import-litepos", async (c) => {
       )
       .bind(businessId)
       .first<{ id: string }>();
-    if (!warehouse || !uncategorized)
+    const pos = await db
+      .prepare(
+        `SELECT id FROM locations WHERE business_id=? AND code='POS-01' AND deleted_at IS NULL`,
+      )
+      .bind(businessId)
+      .first<{ id: string }>();
+    if (!warehouse || !pos || !uncategorized)
       return c.json({ error: "La importación no fue inicializada" }, 409);
     warehouseId = warehouse.id;
+    posId = pos.id;
     uncategorizedId = uncategorized.id;
   }
 
@@ -311,13 +325,13 @@ maintenanceRoutes.post("/import-litepos", async (c) => {
           cents(row.expectedCashAmount),
           row.countedCashAmount == null ? null : cents(row.countedCashAmount),
           row.difference == null ? null : cents(row.difference),
-          text(row.status),
+          text(row.status) === "open" ? "closed" : text(row.status),
           text(row.openedAt),
-          text(row.closedAt),
+          text(row.closedAt) ?? text(row.updatedAt),
           text(row.createdAt),
           text(row.updatedAt),
           text(row.deletedAt),
-          warehouseId,
+          posId,
         ),
     );
   for (const row of payload.sales)
@@ -336,7 +350,7 @@ maintenanceRoutes.post("/import-litepos", async (c) => {
           text(row.createdAt),
           text(row.updatedAt),
           text(row.deletedAt),
-          warehouseId,
+          posId,
         ),
     );
   for (const row of payload.saleItems)
@@ -400,8 +414,8 @@ maintenanceRoutes.post("/import-litepos", async (c) => {
           businessId,
           text(row.productId),
           text(row.batchId),
-          inbound ? null : warehouseId,
-          inbound ? warehouseId : null,
+          inbound ? null : type === "sale" ? posId : warehouseId,
+          inbound ? (type === "customerReturn" ? posId : warehouseId) : null,
           text(row.saleId),
           text(row.saleRefundId),
           text(row.productionBatchId),
