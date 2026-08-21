@@ -3,6 +3,7 @@ import { FormProvider, useForm } from "react-hook-form";
 import {
   ArrowLeft,
   Banknote,
+  CheckCircle2,
   CreditCard,
   Lock,
   Minus,
@@ -17,6 +18,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { FieldInput, FieldSelect, FieldTextarea } from "../components/fields";
 import { offlineLimitMs, posOffline, type PendingSale } from "../posOffline";
+import { playSaleSound, prepareSaleSound } from "../utils/audio";
 type State = Awaited<ReturnType<typeof api.posState>>;
 type Product = State["products"][number];
 type Order = Awaited<ReturnType<typeof api.posOrders>>["orders"][number];
@@ -28,6 +30,7 @@ export function PosPage() {
   const navigate = useNavigate(),
     [data, setData] = useState<State | null>(null),
     [search, setSearch] = useState(""),
+    [selectedCategoryId, setSelectedCategoryId] = useState("all"),
     [cart, setCart] = useState<Record<string, number>>({}),
     [payment, setPayment] = useState<"cash" | "card">("cash"),
     [error, setError] = useState(""),
@@ -125,13 +128,40 @@ export function PosPage() {
     const timer = window.setInterval(() => setClock(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (!success) return;
+    const timer = window.setTimeout(() => setSuccess(""), 3_500);
+    return () => window.clearTimeout(timer);
+  }, [success]);
   const products = useMemo(
     () =>
-      data?.products.filter((p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()),
+      data?.products.filter(
+        (product) =>
+          (selectedCategoryId === "all" ||
+            product.categoryId === selectedCategoryId) &&
+          product.name.toLowerCase().includes(search.toLowerCase()),
       ) ?? [],
-    [data, search],
+    [data, search, selectedCategoryId],
   );
+  const availableCategories = useMemo(
+    () =>
+      (data?.categories ?? []).filter((category) =>
+        data?.products.some(
+          (product) =>
+            product.categoryId === category.id && Number(product.stock) > 0,
+        ),
+      ),
+    [data],
+  );
+  useEffect(() => {
+    if (
+      selectedCategoryId !== "all" &&
+      !availableCategories.some(
+        (category) => category.id === selectedCategoryId,
+      )
+    )
+      setSelectedCategoryId("all");
+  }, [availableCategories, selectedCategoryId]);
   const lines = Object.entries(cart)
     .map(([id, quantity]) => ({
       product: data?.products.find((p) => p.id === id),
@@ -179,6 +209,7 @@ export function PosPage() {
   async function sell() {
     setError("");
     setSuccess("");
+    const soundReady = prepareSaleSound();
     try {
       const operationId = crypto.randomUUID();
       const saleInput = {
@@ -235,6 +266,8 @@ export function PosPage() {
         await posOffline.saveSnapshot(nextState, lastSync);
         setPendingSales(await posOffline.sales());
         setCart({});
+        await soundReady;
+        playSaleSound();
         setSuccess(
           "Venta guardada sin conexión. Se sincronizará automáticamente.",
         );
@@ -242,6 +275,8 @@ export function PosPage() {
       }
       const result = await api.createPosSale(saleInput);
       setCart({});
+      await soundReady;
+      playSaleSound();
       setSuccess(`Venta registrada por ${money(result.totalCents)}`);
       await load();
     } catch (e) {
@@ -300,7 +335,7 @@ export function PosPage() {
     );
   return (
     <main className="min-h-screen bg-[#f3f5f2] text-slate-900">
-      <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b bg-white px-4 sm:px-7">
+      <header className="sticky top-0 z-30 flex min-h-20 flex-wrap items-center gap-3 border-b bg-white px-4 py-3 sm:px-7">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/admin")}
@@ -315,57 +350,72 @@ export function PosPage() {
             </p>
           </div>
         </div>
-        {data.session && (
-          <div className="flex gap-2">
-            <button
-              disabled={!online}
-              onClick={() => void openOrders()}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black disabled:opacity-40"
-            >
-              Órdenes
-            </button>
-            <button
-              disabled={!online || pendingSales.length > 0}
-              onClick={() => {
-                setClosing(true);
-                closeForm.reset({
-                  amount: data.session?.expectedCashAmountCents
-                    ? data.session.expectedCashAmountCents / 100
-                    : 0,
-                });
-              }}
-              className="rounded-xl border border-red-200 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-40"
-            >
-              Cerrar caja
-            </button>
-          </div>
-        )}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <span
+            className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black ${online ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
+          >
+            {online ? <Wifi size={15} /> : <WifiOff size={15} />}
+            {syncing
+              ? "Sincronizando…"
+              : online
+                ? "En línea"
+                : `${Math.max(0, Math.ceil((offlineLimitMs - (clock - lastSync)) / 60000))} min offline`}
+          </span>
+          <button
+            type="button"
+            disabled={!online || syncing || pendingSales.length === 0}
+            onClick={() => void syncPending()}
+            className={`rounded-xl px-3 py-2 text-xs font-black ${pendingSales.length ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"} disabled:opacity-70`}
+          >
+            {pendingSales.length} pendiente
+            {pendingSales.length === 1 ? "" : "s"}
+          </button>
+          {data.session && (
+            <>
+              <button
+                disabled={!online}
+                onClick={() => void openOrders()}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black disabled:opacity-40"
+              >
+                Órdenes
+              </button>
+              <button
+                disabled={!online || pendingSales.length > 0}
+                onClick={() => {
+                  setClosing(true);
+                  closeForm.reset({
+                    amount: data.session?.expectedCashAmountCents
+                      ? data.session.expectedCashAmountCents / 100
+                      : 0,
+                  });
+                }}
+                className="rounded-xl border border-red-200 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-40"
+              >
+                Cerrar caja
+              </button>
+            </>
+          )}
+        </div>
       </header>
-      <div
-        className={`flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm font-bold ${online ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
-      >
-        <span className="flex items-center gap-2">
-          {online ? <Wifi size={17} /> : <WifiOff size={17} />}
-          {syncing
-            ? "Sincronizando ventas…"
-            : online
-              ? "En línea"
-              : `Sin conexión · ${Math.max(0, Math.ceil((offlineLimitMs - (clock - lastSync)) / 60000))} min restantes`}
-        </span>
-        <button
-          disabled={!online || syncing || pendingSales.length === 0}
-          onClick={() => void syncPending()}
-          className="rounded-lg px-3 py-1 disabled:opacity-60"
-        >
-          {pendingSales.length} venta{pendingSales.length === 1 ? "" : "s"}{" "}
-          pendiente{pendingSales.length === 1 ? "" : "s"}
-        </button>
-      </div>
       {pendingSales.some((sale) => sale.status === "conflict") && (
         <div className="bg-red-50 px-4 py-2 text-sm font-bold text-red-700">
           No se pudo sincronizar una venta:{" "}
           {pendingSales.find((sale) => sale.status === "conflict")?.error}.
           Revisa la conexión o los datos y vuelve a intentar.
+        </div>
+      )}
+      {success && (
+        <div className="fixed right-4 top-24 z-[90] flex max-w-sm items-start gap-3 rounded-2xl border border-emerald-200 bg-white p-4 text-emerald-800 shadow-xl">
+          <CheckCircle2 className="mt-0.5 shrink-0" size={21} />
+          <p className="flex-1 text-sm font-black">{success}</p>
+          <button
+            type="button"
+            onClick={() => setSuccess("")}
+            className="text-emerald-700/60 hover:text-emerald-900"
+            aria-label="Cerrar notificación"
+          >
+            <X size={17} />
+          </button>
         </div>
       )}
       {!data.session ? (
@@ -429,33 +479,60 @@ export function PosPage() {
       ) : (
         <div className="grid min-h-[calc(100vh-80px)] lg:grid-cols-[1fr_390px]">
           <section className="p-4 sm:p-6">
-            <div className="flex items-center gap-3 rounded-2xl bg-white px-4 shadow-sm">
-              <Search className="text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar producto"
-                className="w-full py-3.5 outline-none"
-              />
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+              <div className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl bg-white px-4 shadow-sm">
+                <Search className="shrink-0 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar producto"
+                  className="w-full py-3.5 outline-none"
+                />
+              </div>
+              <div className="flex max-w-full gap-2 overflow-x-auto pb-1 xl:max-w-[58%]">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategoryId("all")}
+                  className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-black ${selectedCategoryId === "all" ? "bg-emerald-700 text-white" : "bg-white text-slate-600 shadow-sm"}`}
+                >
+                  <span className="text-xl">✨</span> Todas
+                </button>
+                {availableCategories.map((category) => (
+                  <button
+                    type="button"
+                    key={category.id}
+                    title={category.name}
+                    onClick={() =>
+                      setSelectedCategoryId((current) =>
+                        current === category.id ? "all" : category.id,
+                      )
+                    }
+                    className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-black ${selectedCategoryId === category.id ? "bg-emerald-700 text-white" : "bg-white text-slate-600 shadow-sm"}`}
+                  >
+                    <span className="text-2xl">{category.icon || "🛒"}</span>
+                    <span>{category.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            {success && (
-              <p className="mt-4 rounded-2xl bg-emerald-50 p-3 font-bold text-emerald-700">
-                {success}
-              </p>
-            )}
             {error && (
               <p className="mt-4 rounded-2xl bg-red-50 p-3 font-bold text-red-700">
                 {error}
               </p>
             )}
-            <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {products.map((product) => (
                 <button
                   key={product.id}
                   disabled={Number(product.stock) <= 0}
                   onClick={() => change(product, 1)}
-                  className="overflow-hidden rounded-3xl bg-white text-left shadow-sm transition hover:-translate-y-0.5 disabled:opacity-50"
+                  className="relative touch-manipulation select-none overflow-hidden rounded-3xl bg-white text-left shadow-sm transition duration-100 [-webkit-tap-highlight-color:transparent] hover:-translate-y-0.5 hover:shadow-md active:scale-[0.94] active:ring-4 active:ring-emerald-500/30 disabled:opacity-50 disabled:active:scale-100 disabled:active:ring-0"
                 >
+                  {Number(cart[product.id] ?? 0) > 0 && (
+                    <span className="absolute right-2 top-2 z-10 grid min-h-8 min-w-8 place-items-center rounded-full bg-emerald-600 px-2 text-sm font-black text-white shadow-lg ring-2 ring-white">
+                      {cart[product.id]}
+                    </span>
+                  )}
                   <div className="aspect-[16/9] bg-slate-100">
                     {product.imageId ? (
                       <img
@@ -468,7 +545,7 @@ export function PosPage() {
                       </div>
                     )}
                   </div>
-                  <div className="p-4">
+                  <div className="p-3">
                     <p className="font-black">{product.name}</p>
                     <p className="text-xs font-bold text-slate-400">
                       {product.categoryName ?? "Sin categoría"} ·{" "}
@@ -484,9 +561,14 @@ export function PosPage() {
                   </div>
                 </button>
               ))}
+              {!products.length && (
+                <div className="col-span-full rounded-3xl border border-dashed border-slate-200 bg-white p-10 text-center font-bold text-slate-400">
+                  No se encontraron productos en esta categoría.
+                </div>
+              )}
             </div>
           </section>
-          <aside className="border-l bg-white p-5">
+          <aside className="border-l bg-white p-5 lg:sticky lg:top-20 lg:h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-black">Carrito</h2>
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-black text-emerald-700">

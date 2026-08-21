@@ -96,10 +96,15 @@ export const api = {
     }),
   products: () => request<{ products: Product[] }>("/api/products"),
   categories: () => request<{ categories: Category[] }>("/api/categories"),
-  createCategory: (name: string) =>
+  createCategory: (input: { name: string; icon: string }) =>
     request<{ category: Category }>("/api/categories", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(input),
+    }),
+  updateCategory: (id: string, input: { name: string; icon: string }) =>
+    request<{ ok: boolean }>(`/api/categories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
     }),
   createProduct: (input: {
     name: string;
@@ -334,6 +339,7 @@ export const api = {
   posState: () =>
     request<{
       locations: Array<{ id: string; name: string }>;
+      categories: Array<{ id: string; name: string; icon: string }>;
       session: {
         id: string;
         locationId: string;
@@ -354,7 +360,9 @@ export const api = {
         id: string;
         name: string;
         imageId?: string;
+        categoryId?: string;
         categoryName?: string;
+        categoryIcon?: string;
         stock: number;
         cashPriceCents: number;
         cardPriceCents: number;

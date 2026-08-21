@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
-import { Plus, Search, Tags, X } from "lucide-react";
+import { Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
-import { FieldInput } from "../components/fields";
+import { FieldInput, FieldSelect } from "../components/fields";
 import { PageSpinner } from "../components/Spinner";
 import type { Category } from "../types";
+import { categoryIcons, filterCategoryIcons } from "./categoryIcons";
 
 export function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Category | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const methods = useForm<{ name: string }>({ defaultValues: { name: "" } });
+  const methods = useForm<{ name: string; icon: string }>({
+    defaultValues: { name: "", icon: "🛒" },
+  });
   async function load() {
     setCategories((await api.categories()).categories);
   }
@@ -26,10 +30,21 @@ export function CategoriesPage() {
       ),
     [categories, query],
   );
-  async function submit(values: { name: string }) {
+  function showForm(category?: Category) {
+    setEditing(category ?? null);
+    setError("");
+    methods.reset({
+      name: category?.name ?? "",
+      icon: category?.icon || "🛒",
+    });
+    setOpen(true);
+  }
+  async function submit(values: { name: string; icon: string }) {
     setError("");
     try {
-      await api.createCategory(values.name);
+      editing
+        ? await api.updateCategory(editing.id, values)
+        : await api.createCategory(values);
       setOpen(false);
       methods.reset();
       await load();
@@ -55,10 +70,7 @@ export function CategoriesPage() {
           </p>
         </div>
         <button
-          onClick={() => {
-            setError("");
-            setOpen(true);
-          }}
+          onClick={() => showForm()}
           className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 font-black text-white"
         >
           <Plus size={18} /> Nueva categoría
@@ -80,10 +92,18 @@ export function CategoriesPage() {
               key={category.id}
               className="flex items-center gap-3 rounded-2xl border border-slate-100 p-4"
             >
-              <span className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
-                <Tags size={19} />
+              <span className="grid size-11 place-items-center rounded-xl bg-emerald-50 text-2xl">
+                {category.icon || "🛒"}
               </span>
-              <p className="font-black">{category.name}</p>
+              <p className="flex-1 font-black">{category.name}</p>
+              <button
+                type="button"
+                onClick={() => showForm(category)}
+                className="rounded-xl border border-slate-200 p-2 hover:bg-slate-50"
+                aria-label={`Editar ${category.name}`}
+              >
+                <Pencil size={16} />
+              </button>
             </article>
           ))}
         </div>
@@ -101,7 +121,9 @@ export function CategoriesPage() {
               className="w-full max-w-md rounded-[2rem] bg-white p-7"
             >
               <div className="flex justify-between">
-                <h2 className="text-2xl font-black">Nueva categoría</h2>
+                <h2 className="text-2xl font-black">
+                  {editing ? "Editar categoría" : "Nueva categoría"}
+                </h2>
                 <button type="button" onClick={() => setOpen(false)}>
                   <X />
                 </button>
@@ -118,6 +140,30 @@ export function CategoriesPage() {
                   })}
                   error={methods.formState.errors.name}
                 />
+                <div className="mt-4">
+                  <FieldSelect
+                    label="Icono"
+                    placeholder="Selecciona un icono"
+                    isSearchable
+                    searchPlaceholder="Buscar icono..."
+                    options={categoryIcons}
+                    getOptionLabel={(option) =>
+                      `${option.value} ${option.label}`
+                    }
+                    getOptionValue={(option) => option.value}
+                    renderOption={(option) => (
+                      <span className="flex items-center gap-2">
+                        <span className="text-xl">{option.value}</span>
+                        <span>{option.label}</span>
+                      </span>
+                    )}
+                    getSearchFilter={filterCategoryIcons}
+                    register={methods.register("icon", {
+                      required: "El icono es obligatorio",
+                    })}
+                    error={methods.formState.errors.icon}
+                  />
+                </div>
               </div>
               {error && (
                 <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">
@@ -136,7 +182,7 @@ export function CategoriesPage() {
                   disabled={methods.formState.isSubmitting}
                   className="rounded-xl bg-emerald-700 px-5 py-2.5 font-black text-white"
                 >
-                  Guardar
+                  {editing ? "Guardar cambios" : "Guardar"}
                 </button>
               </div>
             </form>

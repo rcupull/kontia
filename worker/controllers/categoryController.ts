@@ -11,10 +11,32 @@ export async function listCategories(c: AppContext) {
   return c.json({ categories });
 }
 
-export async function createCategory(c: AppContext, name: string) {
+export async function createCategory(
+  c: AppContext,
+  name: string,
+  icon: string,
+) {
   const category = await new CategoryRepository(c.env.DB).create(
     c.get("sessionUser").businessId,
     name,
+    icon,
   );
   return c.json({ category }, 201);
+}
+
+export async function updateCategory(
+  c: AppContext,
+  id: string,
+  name: string,
+  icon: string,
+) {
+  const updated = await new CategoryRepository(c.env.DB).update(
+    c.get("sessionUser").businessId,
+    id,
+    name,
+    icon,
+  );
+  return updated
+    ? c.json({ ok: true })
+    : c.json({ error: "Categoría no encontrada" }, 404);
 }

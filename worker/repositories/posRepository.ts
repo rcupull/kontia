@@ -33,14 +33,23 @@ export class PosRepository {
       .first<ActiveSession>();
   }
   async state(businessId: string, userId: string) {
-    const locations = (
-      await this.db
+    const [locationResult, categoryResult] = await Promise.all([
+      this.db
         .prepare(
           `SELECT id,name FROM locations WHERE business_id=? AND type='point_of_sale' AND is_active=1 AND deleted_at IS NULL ORDER BY name`,
         )
         .bind(businessId)
-        .all()
-    ).results;
+        .all(),
+      this.db
+        .prepare(
+          `SELECT id,name,COALESCE(icon,'🛒') AS icon FROM categories
+           WHERE business_id=? AND deleted_at IS NULL ORDER BY name`,
+        )
+        .bind(businessId)
+        .all(),
+    ]);
+    const locations = locationResult.results;
+    const categories = categoryResult.results;
     const active = await this.activeSession(businessId, userId);
     let session:
       | (ActiveSession & {
@@ -90,7 +99,8 @@ export class PosRepository {
       products = (
         await this.db
           .prepare(
-            `SELECT p.id,p.name,p.image_id AS imageId,c.name AS categoryName,COALESCE(SUM(bs.quantity),0) AS stock,
+            `SELECT p.id,p.name,p.image_id AS imageId,p.category_id AS categoryId,
+              c.name AS categoryName,COALESCE(c.icon,'🛒') AS categoryIcon,COALESCE(SUM(bs.quantity),0) AS stock,
         COALESCE((SELECT b2.cash_price_cents FROM inventory_batches b2 JOIN inventory_batch_stocks bs2 ON bs2.batch_id=b2.id WHERE b2.business_id=p.business_id AND b2.product_id=p.id AND bs2.location_id=? AND bs2.quantity>0 AND b2.deleted_at IS NULL ORDER BY b2.received_at,b2.id LIMIT 1),0) AS cashPriceCents,
         COALESCE((SELECT b2.card_price_cents FROM inventory_batches b2 JOIN inventory_batch_stocks bs2 ON bs2.batch_id=b2.id WHERE b2.business_id=p.business_id AND b2.product_id=p.id AND bs2.location_id=? AND bs2.quantity>0 AND b2.deleted_at IS NULL ORDER BY b2.received_at,b2.id LIMIT 1),0) AS cardPriceCents
         FROM products p LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN inventory_batches b ON b.product_id=p.id AND b.business_id=p.business_id AND b.deleted_at IS NULL LEFT JOIN inventory_batch_stocks bs ON bs.batch_id=b.id AND bs.location_id=?
@@ -105,7 +115,7 @@ export class PosRepository {
           .all()
       ).results;
     }
-    return { locations, session, products };
+    return { locations, categories, session, products };
   }
   async open(
     businessId: string,

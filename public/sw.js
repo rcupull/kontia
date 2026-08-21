@@ -1,5 +1,5 @@
-const CACHE = "kontia-pos-v1";
-const SHELL = ["/", "/pos", "/manifest.webmanifest", "/pwa-192x192.png", "/pwa-512x512.png", "/favicon.png"];
+const CACHE = "kontia-pos-v2";
+const SHELL = ["/", "/pos", "/manifest.webmanifest", "/pwa-192x192.png", "/pwa-512x512.png", "/favicon.png", "/sounds/cashRegister.mp3"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
