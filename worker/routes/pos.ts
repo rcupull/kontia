@@ -52,6 +52,7 @@ posRoutes.post(
     "json",
     z.object({
       paymentMethod: z.enum(["cash", "card"]),
+      cashSessionId: z.string().uuid(),
       operationId: z.string().uuid(),
       createdAt: z.string().datetime({ offset: true }),
       expectedTotalCents: z.number().int().nonnegative(),

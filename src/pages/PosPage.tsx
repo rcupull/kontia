@@ -17,6 +17,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { FieldInput, FieldSelect, FieldTextarea } from "../components/fields";
+import { Spinner } from "../components/Spinner";
 import { offlineLimitMs, posOffline, type PendingSale } from "../posOffline";
 import { playSaleSound, prepareSaleSound } from "../utils/audio";
 type State = Awaited<ReturnType<typeof api.posState>>;
@@ -26,6 +27,14 @@ const money = (c: number) =>
   new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
     c / 100,
   );
+const offlineAvailableUntil = (state: State, syncedAt: number) => {
+  const authorizedUntil = Date.parse(
+    state.session?.offlineAuthorizedUntil ?? "",
+  );
+  return Number.isFinite(authorizedUntil)
+    ? authorizedUntil
+    : syncedAt + offlineLimitMs;
+};
 export function PosPage() {
   const navigate = useNavigate(),
     [data, setData] = useState<State | null>(null),
@@ -43,6 +52,7 @@ export function PosPage() {
     [pendingSales, setPendingSales] = useState<PendingSale[]>([]),
     [lastSync, setLastSync] = useState(0),
     [syncing, setSyncing] = useState(false),
+    [selling, setSelling] = useState(false),
     [clock, setClock] = useState(Date.now());
   const openForm = useForm<{ locationId: string; amount: number }>({
       defaultValues: { locationId: "", amount: 0 },
@@ -64,7 +74,7 @@ export function PosPage() {
       setOnline(false);
       if (
         snapshot?.state.session &&
-        Date.now() - snapshot.syncedAt <= offlineLimitMs
+        Date.now() <= offlineAvailableUntil(snapshot.state, snapshot.syncedAt)
       ) {
         setData(snapshot.state);
         setLastSync(snapshot.syncedAt);
@@ -81,9 +91,14 @@ export function PosPage() {
     if (!navigator.onLine || syncing) return;
     setSyncing(true);
     const queued = await posOffline.sales();
+    const snapshot = await posOffline.snapshot();
     for (const sale of queued) {
       try {
+        const cashSessionId = sale.cashSessionId ?? snapshot?.state.session?.id;
+        if (!cashSessionId)
+          throw new Error("No se encontró la sesión original de la venta");
         await api.createPosSale({
+          cashSessionId,
           operationId: sale.operationId,
           createdAt: sale.createdAt,
           expectedTotalCents: sale.expectedTotalCents,
@@ -207,12 +222,15 @@ export function PosPage() {
     }
   }
   async function sell() {
+    if (selling) return;
+    setSelling(true);
     setError("");
     setSuccess("");
     const soundReady = prepareSaleSound();
     try {
       const operationId = crypto.randomUUID();
       const saleInput = {
+        cashSessionId: data!.session!.id,
         operationId,
         createdAt: new Date().toISOString(),
         expectedTotalCents: total,
@@ -223,7 +241,7 @@ export function PosPage() {
         })),
       };
       if (!online) {
-        if (!lastSync || Date.now() - lastSync > offlineLimitMs)
+        if (Date.now() > offlineAvailableUntil(data!, lastSync))
           throw new Error("El período offline de 60 minutos expiró");
         const queued: PendingSale = {
           ...saleInput,
@@ -283,6 +301,8 @@ export function PosPage() {
       setError(
         e instanceof Error ? e.message : "No se pudo registrar la venta",
       );
+    } finally {
+      setSelling(false);
     }
   }
   async function close(values: { amount: number }) {
@@ -359,7 +379,7 @@ export function PosPage() {
               ? "Sincronizando…"
               : online
                 ? "En línea"
-                : `${Math.max(0, Math.ceil((offlineLimitMs - (clock - lastSync)) / 60000))} min offline`}
+                : `${Math.max(0, Math.ceil((offlineAvailableUntil(data, lastSync) - clock) / 60000))} min offline`}
           </span>
           <button
             type="button"
@@ -641,11 +661,17 @@ export function PosPage() {
                 <span>{money(total)}</span>
               </div>
               <button
-                disabled={!lines.length}
+                disabled={!lines.length || selling}
                 onClick={() => void sell()}
                 className="mt-5 w-full rounded-2xl bg-emerald-700 py-3 font-black text-white disabled:opacity-40"
               >
-                Cobrar
+                {selling ? (
+                  <span className="flex justify-center">
+                    <Spinner label="Procesando…" size="sm" tone="light" />
+                  </span>
+                ) : (
+                  "Cobrar"
+                )}
               </button>
             </div>
           </aside>

@@ -1,6 +1,7 @@
 type SaleInput = {
   businessId: string;
   userId: string;
+  cashSessionId: string;
   operationId: string;
   createdAt: string;
   expectedTotalCents: number;
@@ -13,6 +14,9 @@ type ActiveSession = {
   locationName: string;
   openingAmountCents: number;
   openedAt: string;
+  status: "open" | "closed";
+  closedAt: string | null;
+  offlineAuthorizedUntil: string;
 };
 export class PosRepository {
   constructor(private readonly db: D1Database) {}
@@ -27,7 +31,7 @@ export class PosRepository {
   private activeSession(businessId: string, userId: string) {
     return this.db
       .prepare(
-        `SELECT cs.id,cs.location_id AS locationId,l.name AS locationName,cs.opening_amount_cents AS openingAmountCents,cs.opened_at AS openedAt FROM cash_sessions cs JOIN locations l ON l.id=cs.location_id AND l.business_id=cs.business_id WHERE cs.business_id=? AND cs.seller_id=? AND cs.status='open' AND cs.deleted_at IS NULL AND l.type='point_of_sale' AND l.is_active=1 AND l.deleted_at IS NULL ORDER BY cs.opened_at DESC LIMIT 1`,
+        `SELECT cs.id,cs.location_id AS locationId,l.name AS locationName,cs.opening_amount_cents AS openingAmountCents,cs.opened_at AS openedAt,cs.status,cs.closed_at AS closedAt,cs.offline_authorized_until AS offlineAuthorizedUntil FROM cash_sessions cs JOIN locations l ON l.id=cs.location_id AND l.business_id=cs.business_id WHERE cs.business_id=? AND cs.seller_id=? AND cs.status='open' AND cs.deleted_at IS NULL AND l.type='point_of_sale' AND l.is_active=1 AND l.deleted_at IS NULL ORDER BY cs.opened_at DESC LIMIT 1`,
       )
       .bind(businessId, userId)
       .first<ActiveSession>();
@@ -66,6 +70,16 @@ export class PosRepository {
       | null = null;
     let products: unknown[] = [];
     if (active) {
+      const offlineAuthorizedUntil = new Date(
+        Date.now() + 60 * 60 * 1000,
+      ).toISOString();
+      await this.db
+        .prepare(
+          `UPDATE cash_sessions SET offline_authorized_until=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND status='open'`,
+        )
+        .bind(offlineAuthorizedUntil, active.id, businessId)
+        .run();
+      active.offlineAuthorizedUntil = offlineAuthorizedUntil;
       const summary = await this.db
         .prepare(
           `SELECT COUNT(*) AS totalOrders,
@@ -128,10 +142,13 @@ export class PosRepository {
     if (await this.activeSession(businessId, userId))
       throw new Error("SESSION_ALREADY_OPEN");
     const id = crypto.randomUUID(),
-      now = new Date().toISOString();
+      now = new Date().toISOString(),
+      offlineAuthorizedUntil = new Date(
+        Date.now() + 60 * 60 * 1000,
+      ).toISOString();
     await this.db
       .prepare(
-        `INSERT INTO cash_sessions (id,business_id,seller_id,opening_amount_cents,expected_cash_amount_cents,status,opened_at,location_id) VALUES (?,?,?,?,?,'open',?,?)`,
+        `INSERT INTO cash_sessions (id,business_id,seller_id,opening_amount_cents,expected_cash_amount_cents,status,opened_at,location_id,offline_authorized_until) VALUES (?,?,?,?,?,'open',?,?,?)`,
       )
       .bind(
         id,
@@ -141,6 +158,7 @@ export class PosRepository {
         openingAmountCents,
         now,
         location.id,
+        offlineAuthorizedUntil,
       )
       .run();
     return {
@@ -150,6 +168,9 @@ export class PosRepository {
       openingAmountCents,
       expectedCashAmountCents: openingAmountCents,
       openedAt: now,
+      status: "open" as const,
+      closedAt: null,
+      offlineAuthorizedUntil,
     };
   }
   async sale(input: SaleInput) {
@@ -160,13 +181,24 @@ export class PosRepository {
       .bind(input.businessId, input.operationId)
       .first<{ id: string; totalCents: number }>();
     if (existing) return existing;
-    const session = await this.activeSession(input.businessId, input.userId);
+    const session = await this.db
+      .prepare(
+        `SELECT cs.id,cs.location_id AS locationId,l.name AS locationName,
+          cs.opening_amount_cents AS openingAmountCents,cs.opened_at AS openedAt,
+          cs.status,cs.closed_at AS closedAt,cs.offline_authorized_until AS offlineAuthorizedUntil
+        FROM cash_sessions cs JOIN locations l ON l.id=cs.location_id
+        WHERE cs.id=? AND cs.business_id=? AND cs.seller_id=? AND cs.deleted_at IS NULL`,
+      )
+      .bind(input.cashSessionId, input.businessId, input.userId)
+      .first<ActiveSession>();
     if (!session) throw new Error("SESSION_REQUIRED");
     const createdAt = Date.parse(input.createdAt);
     if (
       createdAt < Date.parse(session.openedAt) ||
       createdAt > Date.now() + 5 * 60 * 1000 ||
-      Date.now() - createdAt > 65 * 60 * 1000
+      !session.offlineAuthorizedUntil ||
+      createdAt > Date.parse(session.offlineAuthorizedUntil) ||
+      (session.closedAt != null && createdAt > Date.parse(session.closedAt))
     )
       throw new Error("OFFLINE_PERIOD_EXPIRED");
     const saleId = crypto.randomUUID(),
@@ -279,6 +311,32 @@ export class PosRepository {
           input.createdAt,
         ),
     );
+    if (session.status === "closed") {
+      if (input.paymentMethod === "cash")
+        statements.push(
+          this.db
+            .prepare(
+              `UPDATE cash_sessions SET expected_cash_amount_cents=expected_cash_amount_cents+?,difference_cents=CASE WHEN counted_cash_amount_cents IS NULL THEN NULL ELSE counted_cash_amount_cents-(expected_cash_amount_cents+?) END,updated_at=datetime('now') WHERE id=? AND business_id=?`,
+            )
+            .bind(totalCents, totalCents, session.id, input.businessId),
+        );
+      statements.push(
+        this.db
+          .prepare(
+            `INSERT INTO financial_movements (id,business_id,type,money_location,amount_cents,description,movement_date,related_entity_type,related_entity_id,created_by_user_id)
+           VALUES (?,?,'sessionClose',?,?,'Venta offline sincronizada después del cierre',?,'cashSession',?,?)`,
+          )
+          .bind(
+            crypto.randomUUID(),
+            input.businessId,
+            input.paymentMethod === "cash" ? "cashDeposit" : "bankAccount",
+            totalCents,
+            new Date().toISOString(),
+            session.id,
+            input.userId,
+          ),
+      );
+    }
     await this.db.batch(statements);
     return { id: saleId, totalCents };
   }

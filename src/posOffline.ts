@@ -2,6 +2,7 @@ import type { api } from "./api";
 
 export type PosState = Awaited<ReturnType<typeof api.posState>>;
 export type PendingSale = {
+  cashSessionId?: string;
   operationId: string;
   expectedTotalCents: number;
   paymentMethod: "cash" | "card";

@@ -347,6 +347,7 @@ export const api = {
         openingAmountCents: number;
         expectedCashAmountCents: number;
         openedAt: string;
+        offlineAuthorizedUntil: string;
         totalOrders: number;
         totalItems: number;
         cashOrders: number;
@@ -377,12 +378,14 @@ export const api = {
         openingAmountCents: number;
         expectedCashAmountCents: number;
         openedAt: string;
+        offlineAuthorizedUntil: string;
       };
     }>("/api/pos/sessions", {
       method: "POST",
       body: JSON.stringify({ locationId, openingAmountCents }),
     }),
   createPosSale: (input: {
+    cashSessionId: string;
     operationId: string;
     createdAt: string;
     expectedTotalCents: number;
