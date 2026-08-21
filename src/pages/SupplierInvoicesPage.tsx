@@ -8,6 +8,7 @@ import {
   FieldSelect,
   FieldTextarea,
 } from "../components/fields";
+import { PageSpinner } from "../components/Spinner";
 import type {
   InvoiceReconciliationMovement,
   Supplier,
@@ -38,6 +39,7 @@ export function SupplierInvoicesPage() {
     movements: InvoiceReconciliationMovement[];
   } | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const methods = useForm<{
     supplierId: string;
     invoiceNumber: string;
@@ -59,7 +61,7 @@ export function SupplierInvoicesPage() {
     setSuppliers(s.suppliers);
   }
   useEffect(() => {
-    void load();
+    void load().finally(() => setLoading(false));
   }, []);
   const visible = useMemo(
     () =>
@@ -136,6 +138,7 @@ export function SupplierInvoicesPage() {
       );
     }
   }
+  if (loading) return <PageSpinner label="Cargando facturas…" />;
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

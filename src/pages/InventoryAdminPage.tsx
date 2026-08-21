@@ -16,6 +16,7 @@ import {
   FieldSelect,
   FieldTextarea,
 } from "../components/fields";
+import { PageSpinner } from "../components/Spinner";
 import type {
   InventoryBatch,
   InventoryMovement,
@@ -76,6 +77,7 @@ export function InventoryAdminPage() {
   const [open, setOpen] = useState(false);
   const [editingBatch, setEditingBatch] = useState<InventoryBatch | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   type MovementValues = {
     productId: string;
     batchId: string;
@@ -137,7 +139,7 @@ export function InventoryAdminPage() {
     setLocations(l.locations);
   }
   useEffect(() => {
-    void load();
+    void load().finally(() => setLoading(false));
   }, []);
   const visibleBatches = useMemo(
     () =>
@@ -259,6 +261,7 @@ export function InventoryAdminPage() {
     }
   }
 
+  if (loading) return <PageSpinner label="Cargando inventario…" />;
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

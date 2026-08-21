@@ -19,6 +19,7 @@ import {
   FieldTextarea,
 } from "../components/fields";
 import type { CashSession, FinancialMovement, Sale } from "../types";
+import { PageSpinner } from "../components/Spinner";
 
 const money = (cents: number) =>
   new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
@@ -184,14 +185,20 @@ function LegacyDashboardPage() {
 export function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([]),
     [search, setSearch] = useState(""),
-    [selected, setSelected] = useState<Sale | null>(null);
+    [selected, setSelected] = useState<Sale | null>(null),
+    [loading, setLoading] = useState(true);
   useEffect(() => {
     const timer = setTimeout(
-      () => void api.adminSales(search).then((r) => setSales(r.sales)),
+      () =>
+        void api
+          .adminSales(search)
+          .then((r) => setSales(r.sales))
+          .finally(() => setLoading(false)),
       200,
     );
     return () => clearTimeout(timer);
   }, [search]);
+  if (loading) return <PageSpinner label="Cargando ventas…" />;
   return (
     <section>
       <Heading
@@ -304,14 +311,20 @@ export function SalesPage() {
 
 export function CashSessionsPage() {
   const [sessions, setSessions] = useState<CashSession[]>([]),
-    [search, setSearch] = useState("");
+    [search, setSearch] = useState(""),
+    [loading, setLoading] = useState(true);
   useEffect(() => {
     const timer = setTimeout(
-      () => void api.adminSessions(search).then((r) => setSessions(r.sessions)),
+      () =>
+        void api
+          .adminSessions(search)
+          .then((r) => setSessions(r.sessions))
+          .finally(() => setLoading(false)),
       200,
     );
     return () => clearTimeout(timer);
   }, [search]);
+  if (loading) return <PageSpinner label="Cargando sesiones de caja…" />;
   return (
     <section>
       <Heading
@@ -407,12 +420,16 @@ export function FinancialMovementsPage() {
     [editing, setEditing] = useState<FinancialMovement | null | undefined>(
       undefined,
     ),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [loading, setLoading] = useState(true);
   const methods = useForm<FinancialValues>();
   const load = () =>
     api.financialMovements(search).then((r) => setItems(r.movements));
   useEffect(() => {
-    const timer = setTimeout(() => void load(), 200);
+    const timer = setTimeout(
+      () => void load().finally(() => setLoading(false)),
+      200,
+    );
     return () => clearTimeout(timer);
   }, [search]);
   function open(item: FinancialMovement | null) {
@@ -448,6 +465,7 @@ export function FinancialMovementsPage() {
       setError(e instanceof Error ? e.message : "No se pudo guardar");
     }
   }
+  if (loading) return <PageSpinner label="Cargando finanzas…" />;
   return (
     <section>
       <Heading

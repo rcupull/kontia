@@ -26,6 +26,7 @@ import {
 } from "date-fns";
 import { api, type DashboardMetrics } from "../api";
 import { Chart, type ChartData } from "../components/chart";
+import { PageSpinner } from "../components/Spinner";
 
 type DashboardData = Awaited<ReturnType<typeof api.dashboard>>;
 type Tab = "general" | "products" | "finance" | "inventory";
@@ -808,11 +809,7 @@ export function DashboardPage() {
           {error}
         </p>
       )}
-      {!data && !error && (
-        <p className="py-20 text-center font-bold text-slate-400">
-          Calculando indicadores…
-        </p>
-      )}
+      {!data && !error && <PageSpinner label="Calculando indicadores…" />}
       {data && (
         <div className="mt-6">
           {tab === "general" && (

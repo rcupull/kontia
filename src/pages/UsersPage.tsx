@@ -8,6 +8,7 @@ import {
   FieldInputPassword,
   FieldSelect,
 } from "../components/fields";
+import { PageSpinner } from "../components/Spinner";
 import type { BusinessUser } from "../types";
 
 type FormValues = {
@@ -29,7 +30,8 @@ export function UsersPage() {
     [search, setSearch] = useState(""),
     [editing, setEditing] = useState<BusinessUser | null>(null),
     [open, setOpen] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [loading, setLoading] = useState(true);
   const methods = useForm<FormValues>({
     defaultValues: {
       username: "",
@@ -47,9 +49,9 @@ export function UsersPage() {
     if (sessionUser?.role !== "owner") return;
     const timer = window.setTimeout(
       () =>
-        void load(search).catch(() =>
-          setError("No se pudieron cargar los usuarios"),
-        ),
+        void load(search)
+          .catch(() => setError("No se pudieron cargar los usuarios"))
+          .finally(() => setLoading(false)),
       200,
     );
     return () => window.clearTimeout(timer);
@@ -115,6 +117,7 @@ export function UsersPage() {
         </p>
       </section>
     );
+  if (loading) return <PageSpinner label="Cargando usuarios…" />;
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

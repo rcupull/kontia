@@ -3,6 +3,7 @@ import { FormProvider, useForm } from "react-hook-form";
 import { Plus, Search, Tags, X } from "lucide-react";
 import { api } from "../api";
 import { FieldInput } from "../components/fields";
+import { PageSpinner } from "../components/Spinner";
 import type { Category } from "../types";
 
 export function CategoriesPage() {
@@ -10,12 +11,13 @@ export function CategoriesPage() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const methods = useForm<{ name: string }>({ defaultValues: { name: "" } });
   async function load() {
     setCategories((await api.categories()).categories);
   }
   useEffect(() => {
-    void load();
+    void load().finally(() => setLoading(false));
   }, []);
   const visible = useMemo(
     () =>
@@ -39,6 +41,7 @@ export function CategoriesPage() {
       );
     }
   }
+  if (loading) return <PageSpinner label="Cargando categorías…" />;
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

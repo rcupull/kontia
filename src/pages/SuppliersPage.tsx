@@ -3,6 +3,7 @@ import { FormProvider, useForm } from "react-hook-form";
 import { Building2, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
 import { FieldInput, FieldTextarea } from "../components/fields";
+import { PageSpinner } from "../components/Spinner";
 import type { Supplier } from "../types";
 
 export function SuppliersPage() {
@@ -10,12 +11,13 @@ export function SuppliersPage() {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Supplier | null | undefined>();
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const methods = useForm<Omit<Supplier, "id">>();
   async function load() {
     setSuppliers((await api.suppliers()).suppliers);
   }
   useEffect(() => {
-    void load();
+    void load().finally(() => setLoading(false));
   }, []);
   const visible = useMemo(
     () =>
@@ -58,6 +60,7 @@ export function SuppliersPage() {
       );
     }
   }
+  if (loading) return <PageSpinner label="Cargando proveedores…" />;
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

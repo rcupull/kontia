@@ -3,6 +3,7 @@ import { FormProvider, useForm } from "react-hook-form";
 import { MapPin, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
 import { FieldInput, FieldSelect } from "../components/fields";
+import { PageSpinner } from "../components/Spinner";
 import type { Location } from "../types";
 
 type Values = {
@@ -16,7 +17,8 @@ export function LocationsPage() {
     [search, setSearch] = useState(""),
     [open, setOpen] = useState(false),
     [editing, setEditing] = useState<Location | null>(null),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [loading, setLoading] = useState(true);
   const methods = useForm<Values>({
     defaultValues: { code: "", name: "", type: "warehouse", address: "" },
   });
@@ -24,7 +26,7 @@ export function LocationsPage() {
     setItems((await api.locations()).locations);
   }
   useEffect(() => {
-    void load();
+    void load().finally(() => setLoading(false));
   }, []);
   const visible = useMemo(
     () =>
@@ -65,6 +67,7 @@ export function LocationsPage() {
     await api.setLocationActive(item.id, !item.isActive);
     await load();
   }
+  if (loading) return <PageSpinner label="Cargando ubicaciones…" />;
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

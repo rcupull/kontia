@@ -3,6 +3,7 @@ import { FormProvider, useForm } from "react-hook-form";
 import { ImagePlus, PackagePlus, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
 import { FieldInput, FieldSelect } from "../components/fields";
+import { PageSpinner } from "../components/Spinner";
 import type { Category, Product } from "../types";
 
 async function optimizeProductImage(file: File): Promise<File> {
@@ -36,6 +37,7 @@ export function InventoryPage() {
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const methods = useForm<{
     name: string;
     type: "basic" | "composite";
@@ -51,7 +53,7 @@ export function InventoryPage() {
     setCategories(categoryResult.categories);
   }
   useEffect(() => {
-    void load();
+    void load().finally(() => setLoading(false));
   }, []);
   useEffect(
     () => () => {
@@ -117,6 +119,7 @@ export function InventoryPage() {
     await load();
   }
 
+  if (loading) return <PageSpinner label="Cargando productos…" />;
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
