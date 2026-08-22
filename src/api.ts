@@ -12,6 +12,7 @@ import type {
   Supplier,
   SupplierInvoice,
   BusinessUser,
+  Business,
 } from "./types";
 
 export type DashboardMetrics = {
@@ -46,6 +47,17 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  currentBusiness: () =>
+    request<{ business: Business }>("/api/businesses/current"),
+  updateCurrentBusiness: (input: {
+    name: string;
+    currency: string;
+    salesTaxPercentage: number;
+  }) =>
+    request<{ ok: boolean }>("/api/businesses/current", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
   setupStatus: () => request<{ required: boolean }>("/api/auth/setup/status"),
   setup: (input: {
     bootstrapSecret: string;

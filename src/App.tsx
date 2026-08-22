@@ -13,6 +13,7 @@ import { MaintenancePage } from "./pages/MaintenancePage";
 import { PosPage } from "./pages/PosPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { UsersPage } from "./pages/UsersPage";
+import { BusinessesPage } from "./pages/BusinessesPage";
 import {
   CashSessionsPage,
   FinancialMovementsPage,
@@ -55,25 +56,9 @@ export default function App() {
           element={<FinancialMovementsPage />}
         />
         <Route path="users" element={<UsersPage />} />
-        <Route
-          path="businesses"
-          element={
-            <PlaceholderPage
-              title="Negocios"
-              description="Administración de negocios y configuración fiscal."
-            />
-          }
-        />
+        <Route path="businesses" element={<BusinessesPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />
-        <Route
-          path="settings"
-          element={
-            <PlaceholderPage
-              title="Configuración"
-              description="Moneda, impuestos y preferencias del punto de venta."
-            />
-          }
-        />
+        <Route path="settings" element={<BusinessesPage />} />
       </Route>
       <Route path="/pos" element={<PosPage />} />
       <Route path="*" element={<Navigate to="/admin" replace />} />

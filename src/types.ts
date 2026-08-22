@@ -5,6 +5,15 @@ export type SessionUser = {
   role: "owner" | "manager" | "seller";
 };
 
+export type Business = {
+  id: string;
+  name: string;
+  currency: string;
+  salesTaxPercentage: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type BusinessUser = {
   id: string;
   username: string;
