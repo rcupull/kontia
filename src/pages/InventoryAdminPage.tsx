@@ -18,6 +18,7 @@ import {
 } from "../components/fields";
 import { PageSpinner } from "../components/Spinner";
 import type {
+  Business,
   InventoryBatch,
   InventoryMovement,
   Location,
@@ -60,10 +61,41 @@ const movementOptions = [
 ] as const;
 const label = (type: string) =>
   movementOptions.find(([value]) => value === type)?.[1] ?? type;
-const money = (cents: number) =>
-  new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
+const formatMoney = (cents: number, currency: string) =>
+  new Intl.NumberFormat("es", { style: "currency", currency }).format(
     cents / 100,
   );
+
+function grossMargin(
+  costCents: number,
+  salePriceCents: number,
+  salesTaxPercentage: number,
+) {
+  if (salePriceCents <= 0) return null;
+  const netSalePrice = salePriceCents * (1 - salesTaxPercentage / 100);
+  if (netSalePrice <= 0) return null;
+  return ((netSalePrice - costCents) / netSalePrice) * 100;
+}
+
+function Margin({ value }: { value: number | null }) {
+  if (value === null)
+    return <span className="font-bold text-slate-400">—</span>;
+  const color =
+    value > 0
+      ? "text-emerald-700"
+      : value < 0
+        ? "text-red-600"
+        : "text-slate-500";
+  return (
+    <span className={`font-black ${color}`}>
+      {new Intl.NumberFormat("es", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }).format(value)}
+      %
+    </span>
+  );
+}
 
 export function InventoryAdminPage() {
   const [tab, setTab] = useState<"batches" | "movements">("batches");
@@ -74,6 +106,7 @@ export function InventoryAdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [business, setBusiness] = useState<Business | null>(null);
   const [open, setOpen] = useState(false);
   const [editingBatch, setEditingBatch] = useState<InventoryBatch | null>(null);
   const [error, setError] = useState("");
@@ -125,18 +158,20 @@ export function InventoryAdminPage() {
     },
   });
   async function load() {
-    const [b, m, p, i, l] = await Promise.all([
+    const [b, m, p, i, l, businessResponse] = await Promise.all([
       api.inventoryBatches(),
       api.inventoryMovements(),
       api.products(),
       api.supplierInvoices(),
       api.locations(),
+      api.currentBusiness(),
     ]);
     setBatches(b.batches);
     setMovements(m.movements);
     setProducts(p.products);
     setInvoices(i.invoices);
     setLocations(l.locations);
+    setBusiness(businessResponse.business);
   }
   useEffect(() => {
     void load().finally(() => setLoading(false));
@@ -196,6 +231,9 @@ export function InventoryAdminPage() {
     "disassembly",
   ].includes(type);
   const activeLocations = locations.filter((location) => location.isActive);
+  const currency = business?.currency ?? "CUP";
+  const salesTaxPercentage = business?.salesTaxPercentage ?? 0;
+  const money = (cents: number) => formatMoney(cents, currency);
 
   async function submit(values: MovementValues) {
     setError("");
@@ -354,12 +392,27 @@ export function InventoryAdminPage() {
                         Costo <b>{money(b.unitCostCents)}</b>
                       </p>
                       <p className="text-xs text-slate-500">
-                        Efectivo {money(b.cashPriceCents)} · Tarjeta{" "}
-                        {money(b.cardPriceCents)}
+                        Venta en efectivo {money(b.cashPriceCents)}
                       </p>
+                      <div className="mt-1.5 text-xs text-slate-500">
+                        <p>
+                          Margen efectivo{" "}
+                          <Margin
+                            value={grossMargin(
+                              b.unitCostCents,
+                              b.cashPriceCents,
+                              salesTaxPercentage,
+                            )}
+                          />
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          Precio neto, descontando {salesTaxPercentage}% de
+                          impuesto
+                        </p>
+                      </div>
                     </td>
                     <td className="text-sm">
-                      {new Date(b.receivedAt).toLocaleString()}
+                      {new Date(b.receivedAt).toLocaleDateString("es")}
                     </td>
                     <td className="pr-5 text-right">
                       <button
