@@ -22,7 +22,7 @@ app.onError((error, c) => {
   return c.json({ error: "No pudimos completar la solicitud" }, 500);
 });
 
-app.get("/api/health", (c) => c.json({ ok: true }));
+app.get("/api/health", (c) => c.json({ ok: true, version: __APP_VERSION__ }));
 app.route("/api/auth", authRoutes);
 app.get("/media/:key", getImage);
 for (const resource of [

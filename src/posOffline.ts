@@ -70,4 +70,4 @@ export const posOffline = {
   },
 };
 
-export const offlineLimitMs = 60 * 60 * 1000;
+export const offlineLimitMs = 12 * 60 * 60 * 1000;

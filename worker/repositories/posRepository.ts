@@ -18,6 +18,7 @@ type ActiveSession = {
   closedAt: string | null;
   offlineAuthorizedUntil: string;
 };
+const POS_OFFLINE_WINDOW_MS = 12 * 60 * 60 * 1000;
 export class PosRepository {
   constructor(private readonly db: D1Database) {}
   private location(businessId: string, id: string) {
@@ -71,7 +72,7 @@ export class PosRepository {
     let products: unknown[] = [];
     if (active) {
       const offlineAuthorizedUntil = new Date(
-        Date.now() + 60 * 60 * 1000,
+        Date.now() + POS_OFFLINE_WINDOW_MS,
       ).toISOString();
       await this.db
         .prepare(
@@ -144,7 +145,7 @@ export class PosRepository {
     const id = crypto.randomUUID(),
       now = new Date().toISOString(),
       offlineAuthorizedUntil = new Date(
-        Date.now() + 60 * 60 * 1000,
+        Date.now() + POS_OFFLINE_WINDOW_MS,
       ).toISOString();
     await this.db
       .prepare(

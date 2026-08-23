@@ -34,19 +34,53 @@ export type DashboardMetrics = {
   units: number;
 };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function isConnectionError(reason: unknown) {
+  return reason instanceof ApiError && reason.status === undefined;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8_000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", ...options?.headers },
+    });
+  } catch (reason) {
+    throw new ApiError(
+      controller.signal.aborted
+        ? "La conexión está tardando demasiado"
+        : reason instanceof Error
+          ? reason.message
+          : "No hay conexión con el servidor",
+    );
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const body = (await response.json().catch(() => null)) as
     (T & { error?: string }) | null;
   if (!response.ok)
-    throw new Error(body?.error ?? "No pudimos completar la solicitud");
+    throw new ApiError(
+      body?.error ?? "No pudimos completar la solicitud",
+      response.status,
+    );
   return body as T;
 }
 
 export const api = {
+  health: () => request<{ ok: boolean; version: string }>("/api/health"),
   currentBusiness: () =>
     request<{ business: Business }>("/api/businesses/current"),
   updateCurrentBusiness: (input: {

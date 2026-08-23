@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
 import {
   ArrowLeft,
@@ -15,9 +15,10 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, isConnectionError } from "../api";
 import { FieldInput, FieldSelect, FieldTextarea } from "../components/fields";
 import { Spinner } from "../components/Spinner";
+import { AppVersion } from "../components/AppVersion";
 import { offlineLimitMs, posOffline, type PendingSale } from "../posOffline";
 import { playSaleSound, prepareSaleSound } from "../utils/audio";
 type State = Awaited<ReturnType<typeof api.posState>>;
@@ -54,6 +55,7 @@ export function PosPage() {
     [syncing, setSyncing] = useState(false),
     [selling, setSelling] = useState(false),
     [clock, setClock] = useState(Date.now());
+  const syncingRef = useRef(false);
   const openForm = useForm<{ locationId: string; amount: number }>({
       defaultValues: { locationId: "", amount: 0 },
     }),
@@ -70,6 +72,13 @@ export function PosPage() {
       setLastSync(Date.now());
       await posOffline.saveSnapshot(state);
     } catch (reason) {
+      if (!isConnectionError(reason)) {
+        setError(
+          reason instanceof Error ? reason.message : "No se pudo cargar el POS",
+        );
+        setPendingSales(await posOffline.sales());
+        return;
+      }
       const snapshot = await posOffline.snapshot();
       setOnline(false);
       if (
@@ -88,10 +97,12 @@ export function PosPage() {
     setPendingSales(await posOffline.sales());
   }
   async function syncPending() {
-    if (!navigator.onLine || syncing) return;
+    if (!navigator.onLine || syncingRef.current) return;
+    syncingRef.current = true;
     setSyncing(true);
     const queued = await posOffline.sales();
     const snapshot = await posOffline.snapshot();
+    let connectionAvailable = true;
     for (const sale of queued) {
       try {
         const cashSessionId = sale.cashSessionId ?? snapshot?.state.session?.id;
@@ -107,6 +118,11 @@ export function PosPage() {
         });
         await posOffline.removeSale(sale.operationId);
       } catch (reason) {
+        if (isConnectionError(reason)) {
+          connectionAvailable = false;
+          setOnline(false);
+          break;
+        }
         await posOffline.putSale({
           ...sale,
           status: "conflict",
@@ -119,8 +135,9 @@ export function PosPage() {
       }
     }
     setPendingSales(await posOffline.sales());
+    syncingRef.current = false;
     setSyncing(false);
-    await load();
+    if (connectionAvailable) await load();
   }
   useEffect(() => {
     void (async () => {
@@ -132,11 +149,24 @@ export function PosPage() {
       void syncPending();
     };
     const handleOffline = () => setOnline(false);
+    const retry = window.setInterval(
+      () => {
+        if (navigator.onLine) void syncPending();
+      },
+      5 * 60 * 1000,
+    );
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && navigator.onLine)
+        void syncPending();
+    };
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
+      window.clearInterval(retry);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
   useEffect(() => {
@@ -209,6 +239,61 @@ export function PosPage() {
       return copy;
     });
   }
+  async function saveOfflineSale(
+    saleInput: Omit<PendingSale, "status" | "error">,
+    soundReady: Promise<void>,
+  ) {
+    if (Date.now() > offlineAvailableUntil(data!, lastSync))
+      throw new Error("El período offline de 12 horas expiró");
+    await posOffline.putSale({ ...saleInput, status: "pending" });
+    const nextState = {
+      ...data!,
+      session: data!.session
+        ? {
+            ...data!.session,
+            totalOrders: data!.session.totalOrders + 1,
+            totalItems:
+              data!.session.totalItems +
+              saleInput.items.reduce((sum, item) => sum + item.quantity, 0),
+            cashOrders:
+              data!.session.cashOrders +
+              (saleInput.paymentMethod === "cash" ? 1 : 0),
+            cardOrders:
+              data!.session.cardOrders +
+              (saleInput.paymentMethod === "card" ? 1 : 0),
+            cashSalesCents:
+              data!.session.cashSalesCents +
+              (saleInput.paymentMethod === "cash"
+                ? saleInput.expectedTotalCents
+                : 0),
+            cardSalesCents:
+              data!.session.cardSalesCents +
+              (saleInput.paymentMethod === "card"
+                ? saleInput.expectedTotalCents
+                : 0),
+            expectedCashAmountCents:
+              data!.session.expectedCashAmountCents +
+              (saleInput.paymentMethod === "cash"
+                ? saleInput.expectedTotalCents
+                : 0),
+          }
+        : null,
+      products: data!.products.map((product) => ({
+        ...product,
+        stock:
+          product.stock -
+          (saleInput.items.find((item) => item.productId === product.id)
+            ?.quantity ?? 0),
+      })),
+    };
+    setData(nextState);
+    await posOffline.saveSnapshot(nextState, lastSync);
+    setPendingSales(await posOffline.sales());
+    setCart({});
+    await soundReady;
+    playSaleSound();
+    setSuccess("Venta guardada sin conexión. Se sincronizará automáticamente.");
+  }
   async function open(values: { locationId: string; amount: number }) {
     setError("");
     try {
@@ -241,57 +326,18 @@ export function PosPage() {
         })),
       };
       if (!online) {
-        if (Date.now() > offlineAvailableUntil(data!, lastSync))
-          throw new Error("El período offline de 60 minutos expiró");
-        const queued: PendingSale = {
-          ...saleInput,
-          status: "pending",
-        };
-        await posOffline.putSale(queued);
-        const nextState = {
-          ...data!,
-          session: data!.session
-            ? {
-                ...data!.session,
-                totalOrders: data!.session.totalOrders + 1,
-                totalItems:
-                  data!.session.totalItems +
-                  saleInput.items.reduce((sum, item) => sum + item.quantity, 0),
-                cashOrders:
-                  data!.session.cashOrders + (payment === "cash" ? 1 : 0),
-                cardOrders:
-                  data!.session.cardOrders + (payment === "card" ? 1 : 0),
-                cashSalesCents:
-                  data!.session.cashSalesCents +
-                  (payment === "cash" ? total : 0),
-                cardSalesCents:
-                  data!.session.cardSalesCents +
-                  (payment === "card" ? total : 0),
-                expectedCashAmountCents:
-                  data!.session.expectedCashAmountCents +
-                  (payment === "cash" ? total : 0),
-              }
-            : null,
-          products: data!.products.map((product) => ({
-            ...product,
-            stock:
-              product.stock -
-              (saleInput.items.find((item) => item.productId === product.id)
-                ?.quantity ?? 0),
-          })),
-        };
-        setData(nextState);
-        await posOffline.saveSnapshot(nextState, lastSync);
-        setPendingSales(await posOffline.sales());
-        setCart({});
-        await soundReady;
-        playSaleSound();
-        setSuccess(
-          "Venta guardada sin conexión. Se sincronizará automáticamente.",
-        );
+        await saveOfflineSale(saleInput, soundReady);
         return;
       }
-      const result = await api.createPosSale(saleInput);
+      let result: Awaited<ReturnType<typeof api.createPosSale>>;
+      try {
+        result = await api.createPosSale(saleInput);
+      } catch (reason) {
+        if (!isConnectionError(reason)) throw reason;
+        setOnline(false);
+        await saveOfflineSale(saleInput, soundReady);
+        return;
+      }
       setCart({});
       await soundReady;
       playSaleSound();
@@ -365,9 +411,12 @@ export function PosPage() {
           </button>
           <div>
             <h1 className="text-xl font-black">Kontia POS</h1>
-            <p className="text-xs font-bold text-slate-400">
-              {data.session?.locationName ?? "Selecciona un punto de venta"}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-2">
+              <p className="text-xs font-bold text-slate-400">
+                {data.session?.locationName ?? "Selecciona un punto de venta"}
+              </p>
+              <AppVersion />
+            </div>
           </div>
         </div>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">

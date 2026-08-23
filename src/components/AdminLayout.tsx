@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { api } from "../api";
+import { AppVersion } from "./AppVersion";
 
 const sections = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -87,6 +88,9 @@ export function AdminLayout() {
             </NavLink>
           ))}
       </nav>
+      <div className="border-t border-white/10 px-5 py-3">
+        <AppVersion dark />
+      </div>
     </>
   );
   return (

@@ -1,3 +1,7 @@
+declare global {
+  const __APP_VERSION__: string;
+}
+
 export type Bindings = {
   DB: D1Database;
   ASSETS: Fetcher;
