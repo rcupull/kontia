@@ -6,6 +6,7 @@ import {
   Building2,
   ChevronLeft,
   ClipboardList,
+  EllipsisVertical,
   FileText,
   LayoutDashboard,
   LogOut,
@@ -26,6 +27,7 @@ import {
 import { useAuth } from "../auth";
 import { api } from "../api";
 import { AppVersion } from "./AppVersion";
+import { UserMenuHeader } from "./UserMenuHeader";
 
 const sections = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -47,9 +49,11 @@ const sections = [
 
 export function AdminLayout() {
   const [open, setOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
   async function logout() {
+    setActionsOpen(false);
     await api.logout();
     setUser(null);
     navigate("/");
@@ -98,18 +102,22 @@ export function AdminLayout() {
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-[#163f35] text-white lg:flex">
         {sidebar}
       </aside>
-      {open && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <button
-            className="absolute inset-0 bg-slate-950/50"
-            onClick={() => setOpen(false)}
-            aria-label="Cerrar menú"
-          />
-          <aside className="relative flex h-full w-72 flex-col bg-[#163f35] text-white">
-            {sidebar}
-          </aside>
-        </div>
-      )}
+      <div
+        className={`fixed inset-0 z-50 lg:hidden ${open ? "pointer-events-auto" : "pointer-events-none"}`}
+        aria-hidden={!open}
+        inert={!open}
+      >
+        <button
+          className={`absolute inset-0 bg-slate-950/50 transition-opacity duration-200 ease-out ${open ? "opacity-100" : "opacity-0"}`}
+          onClick={() => setOpen(false)}
+          aria-label="Cerrar menú"
+        />
+        <aside
+          className={`relative flex h-full w-72 flex-col bg-[#163f35] text-white shadow-2xl transition-transform duration-200 ease-out ${open ? "translate-x-0" : "-translate-x-full"}`}
+        >
+          {sidebar}
+        </aside>
+      </div>
       <div className="lg:pl-64">
         <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-7">
           <button
@@ -125,20 +133,52 @@ export function AdminLayout() {
             </p>
             <p className="font-bold text-slate-500">{user?.displayName}</p>
           </div>
-          <div className="ml-auto flex gap-2">
+          <div className="relative ml-auto">
             <button
-              onClick={() => navigate("/pos")}
-              className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black hover:bg-slate-50"
+              type="button"
+              onClick={() => setActionsOpen((current) => !current)}
+              className="rounded-xl border border-slate-200 p-2"
+              aria-label="Abrir menú de administración"
+              aria-expanded={actionsOpen}
             >
-              <ShoppingCart size={17} /> POS
+              <EllipsisVertical size={20} />
             </button>
-            <button
-              onClick={logout}
-              className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"
-              aria-label="Cerrar sesión"
-            >
-              <LogOut size={19} />
-            </button>
+            {actionsOpen && (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-30 cursor-default"
+                  onClick={() => setActionsOpen(false)}
+                  aria-label="Cerrar menú"
+                />
+                <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <UserMenuHeader displayName={user?.displayName} />
+                  <div className="my-1 border-t" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      navigate("/pos");
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50"
+                  >
+                    <ShoppingCart size={17} /> Ir al POS
+                  </button>
+                  <div className="my-1 border-t" />
+                  <button
+                    type="button"
+                    onClick={() => void logout()}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-red-700 hover:bg-red-50"
+                  >
+                    <LogOut size={17} /> Cerrar sesión
+                  </button>
+                  <div className="my-1 border-t" />
+                  <div className="px-3 py-2 text-slate-500">
+                    <AppVersion />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </header>
         <section className="p-4 sm:p-7">

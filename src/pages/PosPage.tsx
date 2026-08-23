@@ -11,7 +11,9 @@ import {
   LogOut,
   Minus,
   Plus,
+  Receipt,
   Search,
+  Shield,
   ShoppingCart,
   Trash2,
   Wifi,
@@ -24,6 +26,7 @@ import { useAuth } from "../auth";
 import { FieldInput, FieldSelect, FieldTextarea } from "../components/fields";
 import { Spinner } from "../components/Spinner";
 import { AppVersion } from "../components/AppVersion";
+import { UserMenuHeader } from "../components/UserMenuHeader";
 import { offlineLimitMs, posOffline, type PendingSale } from "../posOffline";
 import { playSaleSound, prepareSaleSound } from "../utils/audio";
 type State = Awaited<ReturnType<typeof api.posState>>;
@@ -43,7 +46,7 @@ const offlineAvailableUntil = (state: State, syncedAt: number) => {
 };
 export function PosPage() {
   const navigate = useNavigate(),
-    { setUser } = useAuth(),
+    { user, setUser } = useAuth(),
     [data, setData] = useState<State | null>(null),
     [search, setSearch] = useState(""),
     [selectedCategoryId, setSelectedCategoryId] = useState("all"),
@@ -431,21 +434,12 @@ export function PosPage() {
     <main className="min-h-screen bg-[#f3f5f2] text-slate-900">
       <header className="sticky top-0 z-30 flex min-h-16 items-center gap-2 border-b bg-white px-3 py-2 sm:min-h-20 sm:gap-3 sm:px-7 sm:py-3">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate("/admin")}
-            className="hidden rounded-xl p-2 hover:bg-slate-100 sm:block"
-          >
-            <ArrowLeft />
-          </button>
           <div>
             <h1 className="text-base font-black sm:text-xl">Kontia POS</h1>
             <div className="flex flex-wrap items-center gap-x-2">
               <p className="text-xs font-bold text-slate-400">
                 {data.session?.locationName ?? "Selecciona un punto de venta"}
               </p>
-              <span className="hidden sm:inline">
-                <AppVersion />
-              </span>
             </div>
           </div>
         </div>
@@ -486,32 +480,7 @@ export function PosPage() {
             {pendingSales.length} pendiente
             {pendingSales.length === 1 ? "" : "s"}
           </button>
-          {data.session && (
-            <>
-              <button
-                disabled={!online}
-                onClick={() => void openOrders()}
-                className="hidden rounded-xl border border-slate-200 px-4 py-2 text-sm font-black disabled:opacity-40 sm:block"
-              >
-                Órdenes
-              </button>
-              <button
-                disabled={!online || pendingSales.length > 0}
-                onClick={() => {
-                  setClosing(true);
-                  closeForm.reset({
-                    amount: data.session?.expectedCashAmountCents
-                      ? data.session.expectedCashAmountCents / 100
-                      : 0,
-                  });
-                }}
-                className="hidden rounded-xl border border-red-200 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-40 sm:block"
-              >
-                Cerrar caja
-              </button>
-            </>
-          )}
-          <div className="relative sm:hidden">
+          <div className="relative">
             <button
               type="button"
               onClick={() => setMobileMenuOpen((open) => !open)}
@@ -530,10 +499,18 @@ export function PosPage() {
                   aria-label="Cerrar menú"
                 />
                 <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-                  <div className="px-3 py-2 text-slate-500">
-                    <AppVersion />
-                  </div>
-                  <div className="mb-1 border-t" />
+                  <UserMenuHeader displayName={user?.displayName} />
+                  <div className="my-1 border-t" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      navigate("/admin");
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50"
+                  >
+                    <Shield size={17} /> Administración
+                  </button>
                   {pendingSales.length > 0 && (
                     <button
                       type="button"
@@ -550,9 +527,9 @@ export function PosPage() {
                         type="button"
                         disabled={!online}
                         onClick={() => void openOrders()}
-                        className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 disabled:opacity-40"
                       >
-                        Órdenes
+                        <Receipt size={17} /> Órdenes
                       </button>
                       <button
                         type="button"
@@ -566,9 +543,9 @@ export function PosPage() {
                               : 0,
                           });
                         }}
-                        className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-40"
                       >
-                        Cerrar caja
+                        <Lock size={17} /> Cerrar caja
                       </button>
                     </>
                   )}
@@ -580,6 +557,10 @@ export function PosPage() {
                   >
                     <LogOut size={17} /> Cerrar sesión
                   </button>
+                  <div className="my-1 border-t" />
+                  <div className="px-3 py-2 text-slate-500">
+                    <AppVersion />
+                  </div>
                 </div>
               </>
             )}
