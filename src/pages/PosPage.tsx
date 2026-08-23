@@ -4,18 +4,23 @@ import {
   ArrowLeft,
   Banknote,
   CheckCircle2,
+  CloudUpload,
   CreditCard,
+  EllipsisVertical,
   Lock,
+  LogOut,
   Minus,
   Plus,
   Search,
   ShoppingCart,
+  Trash2,
   Wifi,
   WifiOff,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, isConnectionError } from "../api";
+import { useAuth } from "../auth";
 import { FieldInput, FieldSelect, FieldTextarea } from "../components/fields";
 import { Spinner } from "../components/Spinner";
 import { AppVersion } from "../components/AppVersion";
@@ -38,11 +43,13 @@ const offlineAvailableUntil = (state: State, syncedAt: number) => {
 };
 export function PosPage() {
   const navigate = useNavigate(),
+    { setUser } = useAuth(),
     [data, setData] = useState<State | null>(null),
     [search, setSearch] = useState(""),
     [selectedCategoryId, setSelectedCategoryId] = useState("all"),
     [cart, setCart] = useState<Record<string, number>>({}),
     [payment, setPayment] = useState<"cash" | "card">("cash"),
+    [cashReceived, setCashReceived] = useState(""),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
     [closing, setClosing] = useState(false),
@@ -54,6 +61,8 @@ export function PosPage() {
     [lastSync, setLastSync] = useState(0),
     [syncing, setSyncing] = useState(false),
     [selling, setSelling] = useState(false),
+    [mobileView, setMobileView] = useState<"products" | "cart">("products"),
+    [mobileMenuOpen, setMobileMenuOpen] = useState(false),
     [clock, setClock] = useState(Date.now());
   const syncingRef = useRef(false);
   const openForm = useForm<{ locationId: string; amount: number }>({
@@ -224,6 +233,9 @@ export function PosPage() {
         line.quantity,
     0,
   );
+  const cashReceivedCents = Math.round(Number(cashReceived || 0) * 100);
+  const cashIsEnough = cashReceived !== "" && cashReceivedCents >= total;
+  const changeDueCents = Math.max(0, cashReceivedCents - total);
   function change(product: Product, delta: number) {
     setCart((current) => {
       const next = Math.max(
@@ -238,6 +250,11 @@ export function PosPage() {
       else delete copy[product.id];
       return copy;
     });
+  }
+  function clearOrder() {
+    setCart({});
+    setCashReceived("");
+    setMobileView("products");
   }
   async function saveOfflineSale(
     saleInput: Omit<PendingSale, "status" | "error">,
@@ -290,6 +307,8 @@ export function PosPage() {
     await posOffline.saveSnapshot(nextState, lastSync);
     setPendingSales(await posOffline.sales());
     setCart({});
+    setCashReceived("");
+    setMobileView("products");
     await soundReady;
     playSaleSound();
     setSuccess("Venta guardada sin conexión. Se sincronizará automáticamente.");
@@ -339,6 +358,8 @@ export function PosPage() {
         return;
       }
       setCart({});
+      setCashReceived("");
+      setMobileView("products");
       await soundReady;
       playSaleSound();
       setSuccess(`Venta registrada por ${money(result.totalCents)}`);
@@ -364,6 +385,7 @@ export function PosPage() {
     }
   }
   async function openOrders() {
+    setMobileMenuOpen(false);
     setError("");
     try {
       const result = await api.posOrders();
@@ -374,6 +396,12 @@ export function PosPage() {
         e instanceof Error ? e.message : "No se pudieron cargar las órdenes",
       );
     }
+  }
+  async function logout() {
+    setMobileMenuOpen(false);
+    await api.logout();
+    setUser(null);
+    navigate("/");
   }
   async function refund(values: { notes: string }) {
     if (!refunding) return;
@@ -401,40 +429,59 @@ export function PosPage() {
     );
   return (
     <main className="min-h-screen bg-[#f3f5f2] text-slate-900">
-      <header className="sticky top-0 z-30 flex min-h-20 flex-wrap items-center gap-3 border-b bg-white px-4 py-3 sm:px-7">
+      <header className="sticky top-0 z-30 flex min-h-16 items-center gap-2 border-b bg-white px-3 py-2 sm:min-h-20 sm:gap-3 sm:px-7 sm:py-3">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/admin")}
-            className="rounded-xl p-2 hover:bg-slate-100"
+            className="hidden rounded-xl p-2 hover:bg-slate-100 sm:block"
           >
             <ArrowLeft />
           </button>
           <div>
-            <h1 className="text-xl font-black">Kontia POS</h1>
+            <h1 className="text-base font-black sm:text-xl">Kontia POS</h1>
             <div className="flex flex-wrap items-center gap-x-2">
               <p className="text-xs font-bold text-slate-400">
                 {data.session?.locationName ?? "Selecciona un punto de venta"}
               </p>
-              <AppVersion />
+              <span className="hidden sm:inline">
+                <AppVersion />
+              </span>
             </div>
           </div>
         </div>
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        <div className="ml-auto flex items-center justify-end gap-2">
           <span
-            className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black ${online ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
+            className={`flex items-center gap-1.5 rounded-xl p-2 text-xs font-black sm:px-3 ${online ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}
+            title={online ? "En línea" : "Sin conexión"}
+            aria-label={online ? "En línea" : "Sin conexión"}
           >
             {online ? <Wifi size={15} /> : <WifiOff size={15} />}
-            {syncing
-              ? "Sincronizando…"
-              : online
-                ? "En línea"
-                : `${Math.max(0, Math.ceil((offlineAvailableUntil(data, lastSync) - clock) / 60000))} min offline`}
+            <span className="hidden sm:inline">
+              {syncing
+                ? "Sincronizando…"
+                : online
+                  ? "En línea"
+                  : `${Math.max(0, Math.ceil((offlineAvailableUntil(data, lastSync) - clock) / 60000))} min offline`}
+            </span>
           </span>
+          {pendingSales.length > 0 && (
+            <button
+              type="button"
+              disabled={!online || syncing}
+              onClick={() => void syncPending()}
+              className="relative flex items-center gap-1 rounded-xl bg-amber-50 px-2.5 py-2 text-xs font-black text-amber-800 disabled:opacity-60 sm:hidden"
+              title={`${pendingSales.length} ${pendingSales.length === 1 ? "orden pendiente" : "órdenes pendientes"} por sincronizar`}
+              aria-label={`${pendingSales.length} ${pendingSales.length === 1 ? "orden pendiente" : "órdenes pendientes"} por sincronizar`}
+            >
+              <CloudUpload size={16} />
+              <span>{pendingSales.length}</span>
+            </button>
+          )}
           <button
             type="button"
             disabled={!online || syncing || pendingSales.length === 0}
             onClick={() => void syncPending()}
-            className={`rounded-xl px-3 py-2 text-xs font-black ${pendingSales.length ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"} disabled:opacity-70`}
+            className={`hidden rounded-xl px-3 py-2 text-xs font-black sm:block ${pendingSales.length ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"} disabled:opacity-70`}
           >
             {pendingSales.length} pendiente
             {pendingSales.length === 1 ? "" : "s"}
@@ -444,7 +491,7 @@ export function PosPage() {
               <button
                 disabled={!online}
                 onClick={() => void openOrders()}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black disabled:opacity-40"
+                className="hidden rounded-xl border border-slate-200 px-4 py-2 text-sm font-black disabled:opacity-40 sm:block"
               >
                 Órdenes
               </button>
@@ -458,12 +505,85 @@ export function PosPage() {
                       : 0,
                   });
                 }}
-                className="rounded-xl border border-red-200 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-40"
+                className="hidden rounded-xl border border-red-200 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-40 sm:block"
               >
                 Cerrar caja
               </button>
             </>
           )}
+          <div className="relative sm:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              className="rounded-xl border border-slate-200 p-2"
+              aria-label="Abrir menú del POS"
+              aria-expanded={mobileMenuOpen}
+            >
+              <EllipsisVertical size={20} />
+            </button>
+            {mobileMenuOpen && (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-30 cursor-default"
+                  onClick={() => setMobileMenuOpen(false)}
+                  aria-label="Cerrar menú"
+                />
+                <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <div className="px-3 py-2 text-slate-500">
+                    <AppVersion />
+                  </div>
+                  <div className="mb-1 border-t" />
+                  {pendingSales.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={!online || syncing}
+                      onClick={() => void syncPending()}
+                      className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-bold text-blue-700 disabled:opacity-50"
+                    >
+                      Sincronizar ({pendingSales.length})
+                    </button>
+                  )}
+                  {data.session && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={!online}
+                        onClick={() => void openOrders()}
+                        className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        Órdenes
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!online || pendingSales.length > 0}
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          setClosing(true);
+                          closeForm.reset({
+                            amount: data.session?.expectedCashAmountCents
+                              ? data.session.expectedCashAmountCents / 100
+                              : 0,
+                          });
+                        }}
+                        className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-40"
+                      >
+                        Cerrar caja
+                      </button>
+                    </>
+                  )}
+                  <div className="my-1 border-t" />
+                  <button
+                    type="button"
+                    onClick={() => void logout()}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50"
+                  >
+                    <LogOut size={17} /> Cerrar sesión
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
       {pendingSales.some((sale) => sale.status === "conflict") && (
@@ -546,8 +666,10 @@ export function PosPage() {
           </div>
         </section>
       ) : (
-        <div className="grid min-h-[calc(100vh-80px)] lg:grid-cols-[1fr_390px]">
-          <section className="p-4 sm:p-6">
+        <div className="grid min-h-[calc(100vh-64px)] lg:min-h-[calc(100vh-80px)] lg:grid-cols-[1fr_390px]">
+          <section
+            className={`${mobileView === "cart" ? "hidden" : "block"} p-3 pb-24 sm:block sm:p-6 sm:pb-6`}
+          >
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
               <div className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl bg-white px-4 shadow-sm">
                 <Search className="shrink-0 text-slate-400" />
@@ -589,13 +711,13 @@ export function PosPage() {
                 {error}
               </p>
             )}
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:mt-5 sm:gap-3 md:grid-cols-3 xl:grid-cols-4">
               {products.map((product) => (
                 <button
                   key={product.id}
                   disabled={Number(product.stock) <= 0}
                   onClick={() => change(product, 1)}
-                  className="relative touch-manipulation select-none overflow-hidden rounded-3xl bg-white text-left shadow-sm transition duration-100 [-webkit-tap-highlight-color:transparent] hover:-translate-y-0.5 hover:shadow-md active:scale-[0.94] active:ring-4 active:ring-emerald-500/30 disabled:opacity-50 disabled:active:scale-100 disabled:active:ring-0"
+                  className="relative touch-manipulation select-none overflow-hidden rounded-2xl bg-white text-left shadow-sm transition duration-100 [-webkit-tap-highlight-color:transparent] hover:-translate-y-0.5 hover:shadow-md active:scale-[0.94] active:ring-4 active:ring-emerald-500/30 disabled:opacity-50 disabled:active:scale-100 disabled:active:ring-0 sm:rounded-3xl"
                 >
                   {Number(cart[product.id] ?? 0) > 0 && (
                     <span className="absolute right-2 top-2 z-10 grid min-h-8 min-w-8 place-items-center rounded-full bg-emerald-600 px-2 text-sm font-black text-white shadow-lg ring-2 ring-white">
@@ -614,13 +736,15 @@ export function PosPage() {
                       </div>
                     )}
                   </div>
-                  <div className="p-3">
-                    <p className="font-black">{product.name}</p>
-                    <p className="text-xs font-bold text-slate-400">
+                  <div className="p-2.5 sm:p-3">
+                    <p className="line-clamp-2 text-sm font-black sm:text-base">
+                      {product.name}
+                    </p>
+                    <p className="mt-0.5 line-clamp-1 text-[10px] font-bold text-slate-400 sm:text-xs">
                       {product.categoryName ?? "Sin categoría"} ·{" "}
                       {product.stock} disponibles
                     </p>
-                    <p className="mt-3 font-black text-emerald-700">
+                    <p className="mt-2 text-sm font-black text-emerald-700 sm:mt-3 sm:text-base">
                       {money(
                         payment === "cash"
                           ? product.cashPriceCents
@@ -637,12 +761,37 @@ export function PosPage() {
               )}
             </div>
           </section>
-          <aside className="border-l bg-white p-5 lg:sticky lg:top-20 lg:h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
+          <aside
+            className={`${mobileView === "cart" ? "block" : "hidden"} min-h-[calc(100vh-64px)] bg-white p-4 sm:p-5 lg:sticky lg:top-20 lg:block lg:h-[calc(100vh-5rem)] lg:min-h-0 lg:self-start lg:overflow-y-auto lg:border-l`}
+          >
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-black">Carrito</h2>
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-black text-emerald-700">
-                {lines.reduce((s, l) => s + l.quantity, 0)}
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMobileView("products")}
+                  className="rounded-xl bg-slate-100 p-2 lg:hidden"
+                  aria-label="Volver a productos"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+                <h2 className="text-xl font-black">Detalle de la orden</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-black text-emerald-700">
+                  {lines.reduce((s, l) => s + l.quantity, 0)}
+                </span>
+                {lines.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearOrder}
+                    className="rounded-xl bg-red-50 p-2 text-red-600 hover:bg-red-100 hover:text-red-700"
+                    aria-label="Eliminar toda la orden"
+                    title="Eliminar toda la orden"
+                  >
+                    <Trash2 size={19} />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="mt-5 space-y-3">
               {lines.map((line) => (
@@ -651,22 +800,26 @@ export function PosPage() {
                     <p className="font-black">{line.product.name}</p>
                     <button
                       onClick={() => change(line.product, -line.quantity)}
+                      className="rounded-lg p-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+                      aria-label={`Eliminar ${line.product.name} de la orden`}
                     >
-                      <X size={16} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                   <div className="mt-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => change(line.product, -1)}
-                        className="rounded-lg bg-slate-100 p-1"
+                        className="rounded-lg bg-red-50 p-1 text-red-700 hover:bg-red-100"
+                        aria-label={`Reducir cantidad de ${line.product.name}`}
                       >
                         <Minus size={16} />
                       </button>
                       <b>{line.quantity}</b>
                       <button
                         onClick={() => change(line.product, 1)}
-                        className="rounded-lg bg-slate-100 p-1"
+                        className="rounded-lg bg-emerald-50 p-1 text-emerald-700 hover:bg-emerald-100"
+                        aria-label={`Aumentar cantidad de ${line.product.name}`}
                       >
                         <Plus size={16} />
                       </button>
@@ -709,6 +862,44 @@ export function PosPage() {
                 <span>Total</span>
                 <span>{money(total)}</span>
               </div>
+              {payment === "cash" && (
+                <div className="mt-4 rounded-2xl bg-slate-100 p-4">
+                  <label
+                    htmlFor="cash-received"
+                    className="text-sm font-black text-slate-600"
+                  >
+                    Efectivo recibido
+                  </label>
+                  <div className="mt-2 flex items-center rounded-xl border border-slate-200 bg-white px-3 focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/15">
+                    <span className="font-black text-slate-400">$</span>
+                    <input
+                      id="cash-received"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.01"
+                      value={cashReceived}
+                      onChange={(event) => setCashReceived(event.target.value)}
+                      placeholder="0.00"
+                      className="min-w-0 flex-1 bg-transparent px-2 py-3 text-right text-xl font-black outline-none"
+                    />
+                  </div>
+                  {cashReceived !== "" && (
+                    <div
+                      className={`mt-3 flex items-center justify-between font-black ${cashIsEnough ? "text-emerald-700" : "text-red-600"}`}
+                    >
+                      <span>{cashIsEnough ? "Vuelto" : "Faltan"}</span>
+                      <span className="text-2xl">
+                        {money(
+                          cashIsEnough
+                            ? changeDueCents
+                            : Math.max(0, total - cashReceivedCents),
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 disabled={!lines.length || selling}
                 onClick={() => void sell()}
@@ -724,6 +915,31 @@ export function PosPage() {
               </button>
             </div>
           </aside>
+          {mobileView === "products" && lines.length > 0 && (
+            <div className="fixed bottom-4 left-4 right-4 z-20 flex items-center rounded-2xl bg-emerald-700 p-1.5 shadow-xl shadow-emerald-950/20 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileView("cart")}
+                className="flex min-w-0 flex-1 items-center justify-between px-2.5 py-2.5 font-black text-white"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <ShoppingCart className="shrink-0" size={20} />
+                  <span className="truncate">
+                    Ver orden ({lines.reduce((s, l) => s + l.quantity, 0)})
+                  </span>
+                </span>
+                <span className="ml-2 shrink-0">{money(total)}</span>
+              </button>
+              <button
+                type="button"
+                onClick={clearOrder}
+                className="ml-1 grid min-w-11 place-items-center rounded-xl bg-red-50 p-2.5 text-red-600 active:bg-red-100"
+                aria-label="Eliminar toda la orden"
+              >
+                <Trash2 size={21} />
+              </button>
+            </div>
+          )}
         </div>
       )}
       {closing && (
@@ -940,11 +1156,11 @@ export function PosPage() {
         </div>
       )}
       {refunding && (
-        <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/50 p-4">
+        <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/50 p-3 sm:items-center sm:p-4">
           <FormProvider {...refundForm}>
             <form
               onSubmit={refundForm.handleSubmit(refund)}
-              className="w-full max-w-2xl rounded-3xl bg-white p-7"
+              className="my-2 w-full max-w-2xl rounded-3xl bg-white p-4 sm:my-4 sm:p-7"
             >
               <div className="flex justify-between">
                 <div>
@@ -1018,15 +1234,15 @@ export function PosPage() {
               {error && (
                 <p className="mt-4 text-sm font-bold text-red-700">{error}</p>
               )}
-              <div className="mt-6 flex justify-end gap-3">
+              <div className="mt-6 flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end sm:gap-3 sm:border-0 sm:pt-0">
                 <button
                   type="button"
                   onClick={() => setRefunding(null)}
-                  className="font-black text-slate-500"
+                  className="w-full rounded-xl px-3 py-2.5 font-black text-slate-500 sm:w-auto"
                 >
                   Cancelar
                 </button>
-                <button className="rounded-xl bg-red-700 px-5 py-2.5 font-black text-white">
+                <button className="w-full rounded-xl bg-red-700 px-4 py-2.5 font-black text-white sm:w-auto sm:px-5">
                   Confirmar reintegro
                 </button>
               </div>
