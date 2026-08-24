@@ -24,6 +24,14 @@ Requiere Node.js 22.12 o posterior; se recomienda Node 24 (consulta `.nvmrc`).
 En el primer acceso, Kontia solicitará el secreto de configuración para crear el negocio y el usuario propietario.
 La base D1 local, incluidas las imágenes, se persiste en `.wrangler/state`.
 
+Para reemplazar por completo la base local con una copia de la base remota:
+
+```bash
+npm run db:restore:local-from-remote
+```
+
+Este comando elimina los datos locales existentes; no modifica la base remota.
+
 ## Preparar Cloudflare
 
 ```bash
