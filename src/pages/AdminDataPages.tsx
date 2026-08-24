@@ -212,7 +212,7 @@ export function SalesPage() {
         placeholder="Buscar por producto, vendedor o total"
       />
       <div className="mt-4 overflow-x-auto rounded-3xl bg-white shadow-sm">
-        <table className="w-full min-w-[850px] text-left">
+        <table className="w-full min-w-[1000px] text-left">
           <thead className="text-xs uppercase text-slate-400">
             <tr>
               <th className="px-5 py-4">Fecha</th>
@@ -221,6 +221,7 @@ export function SalesPage() {
               <th>Total</th>
               <th>Productos</th>
               <th>Vendedor</th>
+              <th>Ubicación</th>
               <th />
             </tr>
           </thead>
@@ -243,6 +244,18 @@ export function SalesPage() {
                 </td>
                 <td>{s.items.length}</td>
                 <td>{s.sellerName}</td>
+                <td>
+                  <p className="font-bold">
+                    {s.locationName ?? "Sin ubicación"}
+                  </p>
+                  {s.locationType && (
+                    <span className="text-xs font-bold text-slate-400">
+                      {s.locationType === "warehouse"
+                        ? "Almacén"
+                        : "Punto de venta"}
+                    </span>
+                  )}
+                </td>
                 <td className="pr-5 text-right">
                   <button
                     onClick={() => setSelected(s)}
@@ -267,6 +280,12 @@ export function SalesPage() {
                 <p className="text-sm text-slate-500">
                   {date(selected.createdAt)} · {selected.sellerName}
                 </p>
+                <p className="mt-1 text-sm font-bold text-emerald-700">
+                  {selected.locationName ?? "Sin ubicación"}
+                  {selected.locationType
+                    ? ` · ${selected.locationType === "warehouse" ? "Almacén" : "Punto de venta"}`
+                    : ""}
+                </p>
               </div>
               <button onClick={() => setSelected(null)}>
                 <X />
@@ -275,6 +294,11 @@ export function SalesPage() {
             {selected.refundId && (
               <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">
                 Venta anulada. {selected.refundNotes}
+              </p>
+            )}
+            {selected.notes && (
+              <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900">
+                Precio diferenciado: {selected.notes}
               </p>
             )}
             <div className="mt-5 overflow-x-auto">
@@ -338,11 +362,12 @@ export function CashSessionsPage() {
         placeholder="Buscar por vendedor"
       />
       <div className="mt-4 overflow-x-auto rounded-3xl bg-white shadow-sm">
-        <table className="w-full min-w-[1050px] text-left">
+        <table className="w-full min-w-[1200px] text-left">
           <thead className="text-xs uppercase text-slate-400">
             <tr>
               <th className="px-5 py-4">Estado</th>
               <th>Vendedor</th>
+              <th>Ubicación</th>
               <th>Apertura</th>
               <th>Cierre</th>
               <th>Ventas</th>
@@ -361,6 +386,18 @@ export function CashSessionsPage() {
                   </span>
                 </td>
                 <td className="font-bold">{s.sellerName}</td>
+                <td>
+                  <p className="font-bold">
+                    {s.locationName ?? "Sin ubicación"}
+                  </p>
+                  {s.locationType && (
+                    <span className="text-xs font-bold text-slate-400">
+                      {s.locationType === "warehouse"
+                        ? "Almacén"
+                        : "Punto de venta"}
+                    </span>
+                  )}
+                </td>
                 <td>{date(s.openedAt)}</td>
                 <td>{date(s.closedAt)}</td>
                 <td>

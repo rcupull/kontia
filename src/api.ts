@@ -382,14 +382,28 @@ export const api = {
     }>(
       `/api/admin-data/dashboard?${new URLSearchParams({ ...(from && { from }), ...(to && { to }) })}`,
     ),
-  posState: () =>
+  posState: (sessionId?: string, selectNone = false) =>
     request<{
-      locations: Array<{ id: string; name: string }>;
+      locations: Array<{
+        id: string;
+        name: string;
+        type: "warehouse" | "point_of_sale";
+      }>;
+      openSessions: Array<{
+        id: string;
+        locationId: string;
+        locationName: string;
+        locationType: "warehouse" | "point_of_sale";
+        openingAmountCents: number;
+        openedAt: string;
+        offlineAuthorizedUntil: string;
+      }>;
       categories: Array<{ id: string; name: string; icon: string }>;
       session: {
         id: string;
         locationId: string;
         locationName: string;
+        locationType: "warehouse" | "point_of_sale";
         openingAmountCents: number;
         expectedCashAmountCents: number;
         openedAt: string;
@@ -414,7 +428,9 @@ export const api = {
         cashPriceCents: number;
         cardPriceCents: number;
       }>;
-    }>("/api/pos/state"),
+    }>(
+      `/api/pos/state?${new URLSearchParams({ ...(selectNone ? { sessionId: "none" } : sessionId ? { sessionId } : {}) })}`,
+    ),
   openPosSession: (locationId: string, openingAmountCents: number) =>
     request<{
       session: {
@@ -436,13 +452,18 @@ export const api = {
     createdAt: string;
     expectedTotalCents: number;
     paymentMethod: "cash" | "card";
-    items: Array<{ productId: string; quantity: number }>;
+    notes?: string;
+    items: Array<{
+      productId: string;
+      quantity: number;
+      unitPriceCents?: number;
+    }>;
   }) =>
     request<{ id: string; totalCents: number }>("/api/pos/sales", {
       method: "POST",
       body: JSON.stringify(input),
     }),
-  posOrders: () =>
+  posOrders: (sessionId: string) =>
     request<{
       orders: Array<{
         id: string;
@@ -459,16 +480,19 @@ export const api = {
           totalCents: number;
         }>;
       }>;
-    }>("/api/pos/orders"),
-  refundPosOrder: (id: string, notes?: string) =>
+    }>(`/api/pos/orders?${new URLSearchParams({ sessionId })}`),
+  refundPosOrder: (sessionId: string, id: string, notes?: string) =>
     request<{ id: string }>(`/api/pos/orders/${id}/refund`, {
       method: "POST",
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ sessionId, notes }),
     }),
-  closePosSession: (countedCashAmountCents: number) =>
+  closePosSession: (sessionId: string, countedCashAmountCents: number) =>
     request<{ expectedCashAmountCents: number; differenceCents: number }>(
       "/api/pos/sessions/close",
-      { method: "POST", body: JSON.stringify({ countedCashAmountCents }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ sessionId, countedCashAmountCents }),
+      },
     ),
   locations: (search = "") =>
     request<{ locations: Location[] }>(

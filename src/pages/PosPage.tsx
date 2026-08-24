@@ -44,6 +44,7 @@ const offlineAvailableUntil = (state: State, syncedAt: number) => {
     ? authorizedUntil
     : syncedAt + offlineLimitMs;
 };
+const selectedSessionStorageKey = "kontia-pos-selected-session";
 export function PosPage() {
   const navigate = useNavigate(),
     { user, setUser } = useAuth(),
@@ -51,6 +52,8 @@ export function PosPage() {
     [search, setSearch] = useState(""),
     [selectedCategoryId, setSelectedCategoryId] = useState("all"),
     [cart, setCart] = useState<Record<string, number>>({}),
+    [priceOverrides, setPriceOverrides] = useState<Record<string, number>>({}),
+    [saleNotes, setSaleNotes] = useState(""),
     [payment, setPayment] = useState<"cash" | "card">("cash"),
     [cashReceived, setCashReceived] = useState(""),
     [error, setError] = useState(""),
@@ -67,6 +70,9 @@ export function PosPage() {
     [mobileView, setMobileView] = useState<"products" | "cart">("products"),
     [mobileMenuOpen, setMobileMenuOpen] = useState(false),
     [clock, setClock] = useState(Date.now());
+  const [selectedSessionId, setSelectedSessionId] = useState(
+    () => window.localStorage.getItem(selectedSessionStorageKey) ?? "",
+  );
   const syncingRef = useRef(false);
   const openForm = useForm<{ locationId: string; amount: number }>({
       defaultValues: { locationId: "", amount: 0 },
@@ -76,10 +82,23 @@ export function PosPage() {
   const countedCashCents = Math.round(
     Number(closeForm.watch("amount") || 0) * 100,
   );
-  async function load() {
+  async function load(sessionId = selectedSessionId, selectNone = false) {
     try {
-      const state = await api.posState();
+      const state = await api.posState(sessionId || undefined, selectNone);
       setData(state);
+      if (state.session) {
+        setSelectedSessionId(state.session.id);
+        window.localStorage.setItem(
+          selectedSessionStorageKey,
+          state.session.id,
+        );
+      } else if (
+        sessionId &&
+        !state.openSessions.some((session) => session.id === sessionId)
+      ) {
+        setSelectedSessionId("");
+        window.localStorage.removeItem(selectedSessionStorageKey);
+      }
       setOnline(true);
       setLastSync(Date.now());
       await posOffline.saveSnapshot(state);
@@ -91,7 +110,9 @@ export function PosPage() {
         setPendingSales(await posOffline.sales());
         return;
       }
-      const snapshot = await posOffline.snapshot();
+      const snapshot = sessionId
+        ? await posOffline.snapshot(sessionId)
+        : undefined;
       setOnline(false);
       if (
         snapshot?.state.session &&
@@ -113,11 +134,10 @@ export function PosPage() {
     syncingRef.current = true;
     setSyncing(true);
     const queued = await posOffline.sales();
-    const snapshot = await posOffline.snapshot();
     let connectionAvailable = true;
     for (const sale of queued) {
       try {
-        const cashSessionId = sale.cashSessionId ?? snapshot?.state.session?.id;
+        const cashSessionId = sale.cashSessionId;
         if (!cashSessionId)
           throw new Error("No se encontró la sesión original de la venta");
         await api.createPosSale({
@@ -126,6 +146,7 @@ export function PosPage() {
           createdAt: sale.createdAt,
           expectedTotalCents: sale.expectedTotalCents,
           paymentMethod: sale.paymentMethod,
+          notes: sale.notes,
           items: sale.items,
         });
         await posOffline.removeSale(sale.operationId);
@@ -149,7 +170,7 @@ export function PosPage() {
     setPendingSales(await posOffline.sales());
     syncingRef.current = false;
     setSyncing(false);
-    if (connectionAvailable) await load();
+    if (connectionAvailable) await load(selectedSessionId);
   }
   useEffect(() => {
     void (async () => {
@@ -227,35 +248,79 @@ export function PosPage() {
     .filter((line): line is { product: Product; quantity: number } =>
       Boolean(line.product),
     );
+  const isWarehouse = data?.session?.locationType === "warehouse";
+  const standardPrice = (product: Product) =>
+    payment === "cash" ? product.cashPriceCents : product.cardPriceCents;
+  const appliedPrice = (product: Product) =>
+    isWarehouse && priceOverrides[product.id] !== undefined
+      ? priceOverrides[product.id]
+      : standardPrice(product);
+  const hasPriceOverrides = lines.some(
+    (line) => appliedPrice(line.product) !== standardPrice(line.product),
+  );
   const total = lines.reduce(
-    (sum, line) =>
-      sum +
-      (payment === "cash"
-        ? line.product.cashPriceCents
-        : line.product.cardPriceCents) *
-        line.quantity,
+    (sum, line) => sum + Math.round(appliedPrice(line.product) * line.quantity),
     0,
   );
   const cashReceivedCents = Math.round(Number(cashReceived || 0) * 100);
   const cashIsEnough = cashReceived !== "" && cashReceivedCents >= total;
   const changeDueCents = Math.max(0, cashReceivedCents - total);
-  function change(product: Product, delta: number) {
-    setCart((current) => {
-      const next = Math.max(
-          0,
-          Math.min(
-            Number(product.stock),
-            Number(current[product.id] ?? 0) + delta,
-          ),
+  const activePendingSales = pendingSales.filter(
+    (sale) => sale.cashSessionId === data?.session?.id,
+  );
+  const availableOpeningLocations =
+    data?.locations.filter(
+      (location) =>
+        !data.openSessions.some(
+          (session) => session.locationId === location.id,
         ),
-        copy = { ...current };
-      if (next) copy[product.id] = next;
+    ) ?? [];
+  async function selectSession(sessionId: string) {
+    if (
+      lines.length > 0 &&
+      !window.confirm(
+        "El carrito actual se vaciará al cambiar de caja. ¿Continuar?",
+      )
+    )
+      return;
+    setError("");
+    setCart({});
+    setPriceOverrides({});
+    setSaleNotes("");
+    setCashReceived("");
+    setOrdersOpen(false);
+    setSelectedSessionId(sessionId);
+    if (sessionId)
+      window.localStorage.setItem(selectedSessionStorageKey, sessionId);
+    else window.localStorage.removeItem(selectedSessionStorageKey);
+    await load(sessionId, !sessionId);
+  }
+  function change(product: Product, delta: number) {
+    const next = Math.max(
+      0,
+      Math.min(Number(product.stock), Number(cart[product.id] ?? 0) + delta),
+    );
+    setQuantity(product, next);
+  }
+  function setQuantity(product: Product, quantity: number) {
+    const next = Math.max(0, Math.min(Number(product.stock), quantity || 0));
+    setCart((current) => {
+      const copy = { ...current };
+      if (next > 0) copy[product.id] = next;
       else delete copy[product.id];
       return copy;
     });
+    if (next === 0)
+      setPriceOverrides((prices) => {
+        const nextPrices = { ...prices };
+        delete nextPrices[product.id];
+        return nextPrices;
+      });
   }
   function clearOrder() {
     setCart({});
+    setPriceOverrides({});
+    setSaleNotes("");
     setCashReceived("");
     setMobileView("products");
   }
@@ -310,6 +375,8 @@ export function PosPage() {
     await posOffline.saveSnapshot(nextState, lastSync);
     setPendingSales(await posOffline.sales());
     setCart({});
+    setPriceOverrides({});
+    setSaleNotes("");
     setCashReceived("");
     setMobileView("products");
     await soundReady;
@@ -319,11 +386,12 @@ export function PosPage() {
   async function open(values: { locationId: string; amount: number }) {
     setError("");
     try {
-      await api.openPosSession(
+      const result = await api.openPosSession(
         values.locationId,
         Math.round(values.amount * 100),
       );
-      await load();
+      openForm.reset({ locationId: "", amount: 0 });
+      await load(result.session.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo abrir la caja");
     }
@@ -335,6 +403,10 @@ export function PosPage() {
     setSuccess("");
     const soundReady = prepareSaleSound();
     try {
+      if (hasPriceOverrides && !saleNotes.trim())
+        throw new Error(
+          "Indica una nota para justificar el precio diferenciado",
+        );
       const operationId = crypto.randomUUID();
       const saleInput = {
         cashSessionId: data!.session!.id,
@@ -342,9 +414,13 @@ export function PosPage() {
         createdAt: new Date().toISOString(),
         expectedTotalCents: total,
         paymentMethod: payment,
+        notes: saleNotes.trim() || undefined,
         items: lines.map((l) => ({
           productId: l.product.id,
           quantity: l.quantity,
+          ...(isWarehouse && {
+            unitPriceCents: appliedPrice(l.product),
+          }),
         })),
       };
       if (!online) {
@@ -361,6 +437,8 @@ export function PosPage() {
         return;
       }
       setCart({});
+      setPriceOverrides({});
+      setSaleNotes("");
       setCashReceived("");
       setMobileView("products");
       await soundReady;
@@ -378,11 +456,18 @@ export function PosPage() {
   async function close(values: { amount: number }) {
     setError("");
     try {
-      const result = await api.closePosSession(Math.round(values.amount * 100));
+      const result = await api.closePosSession(
+        data!.session!.id,
+        Math.round(values.amount * 100),
+      );
       setClosing(false);
       setCart({});
+      setPriceOverrides({});
+      setSaleNotes("");
+      setSelectedSessionId("");
+      window.localStorage.removeItem(selectedSessionStorageKey);
       setSuccess(`Caja cerrada. Diferencia: ${money(result.differenceCents)}`);
-      await load();
+      await load("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo cerrar la caja");
     }
@@ -391,7 +476,7 @@ export function PosPage() {
     setMobileMenuOpen(false);
     setError("");
     try {
-      const result = await api.posOrders();
+      const result = await api.posOrders(data!.session!.id);
       setOrders(result.orders);
       setOrdersOpen(true);
     } catch (e) {
@@ -410,10 +495,14 @@ export function PosPage() {
     if (!refunding) return;
     setError("");
     try {
-      await api.refundPosOrder(refunding.id, values.notes || undefined);
+      await api.refundPosOrder(
+        data!.session!.id,
+        refunding.id,
+        values.notes || undefined,
+      );
       setRefunding(null);
       refundForm.reset();
-      const result = await api.posOrders();
+      const result = await api.posOrders(data!.session!.id);
       setOrders(result.orders);
       setSuccess("Reintegro registrado correctamente");
       await load();
@@ -498,8 +587,61 @@ export function PosPage() {
                   onClick={() => setMobileMenuOpen(false)}
                   aria-label="Cerrar menú"
                 />
-                <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                <div className="absolute right-0 top-12 z-40 max-h-[calc(100vh-5rem)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
                   <UserMenuHeader displayName={user?.displayName} />
+                  <div className="my-1 border-t" />
+                  {data.openSessions.length > 0 && (
+                    <div className="py-1">
+                      <p className="px-3 py-1 text-[11px] font-black uppercase tracking-wider text-slate-400">
+                        Cajas abiertas
+                      </p>
+                      {data.openSessions.map((session) => {
+                        const active = session.id === data.session?.id;
+                        return (
+                          <button
+                            key={session.id}
+                            type="button"
+                            disabled={!online && !active}
+                            onClick={() => {
+                              setMobileMenuOpen(false);
+                              if (!active) void selectSession(session.id);
+                            }}
+                            className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold disabled:opacity-40 ${active ? "bg-emerald-50 text-emerald-800" : "hover:bg-slate-50"}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate">
+                                {session.locationName}
+                              </span>
+                              <span className="block text-[11px] text-slate-400">
+                                {session.locationType === "warehouse"
+                                  ? "Almacén"
+                                  : "Punto de venta"}
+                              </span>
+                            </span>
+                            {active && (
+                              <CheckCircle2
+                                size={17}
+                                className="shrink-0 text-emerald-600"
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {user?.role !== "seller" && (
+                    <button
+                      type="button"
+                      disabled={!online}
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        void selectSession("");
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
+                    >
+                      <Plus size={17} /> Abrir otra caja
+                    </button>
+                  )}
                   <div className="my-1 border-t" />
                   <button
                     type="button"
@@ -533,7 +675,7 @@ export function PosPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={!online || pendingSales.length > 0}
+                        disabled={!online || activePendingSales.length > 0}
                         onClick={() => {
                           setMobileMenuOpen(false);
                           setClosing(true);
@@ -545,7 +687,8 @@ export function PosPage() {
                         }}
                         className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-40"
                       >
-                        <Lock size={17} /> Cerrar caja
+                        <Lock size={17} /> Cerrar caja en{" "}
+                        {data.session.locationName}
                       </button>
                     </>
                   )}
@@ -592,7 +735,7 @@ export function PosPage() {
         <section className="mx-auto grid min-h-[calc(100vh-80px)] max-w-lg content-center p-5">
           <div className="rounded-3xl bg-white p-8 shadow-sm">
             <p className="text-sm font-black uppercase text-emerald-700">
-              Punto de venta
+              Apertura de caja
             </p>
             <h2 className="mt-2 text-3xl font-black">
               Abre la caja para comenzar
@@ -600,23 +743,47 @@ export function PosPage() {
             <p className="mt-2 text-slate-500">
               Indica el efectivo inicial disponible.
             </p>
+            {data.openSessions.length > 0 && (
+              <div className="mt-5 rounded-2xl bg-emerald-50 p-4">
+                <p className="text-sm font-black text-emerald-900">
+                  Cajas abiertas
+                </p>
+                <div className="mt-2 space-y-2">
+                  {data.openSessions.map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      onClick={() => void selectSession(session.id)}
+                      className="flex w-full items-center justify-between rounded-xl bg-white px-3 py-2 text-left text-sm font-bold shadow-sm"
+                    >
+                      <span>{session.locationName}</span>
+                      <span className="text-xs text-emerald-700">
+                        {session.locationType === "warehouse"
+                          ? "Almacén"
+                          : "POS"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <FormProvider {...openForm}>
               <form onSubmit={openForm.handleSubmit(open)} className="mt-6">
                 <FieldSelect
-                  label="Punto de venta"
-                  placeholder="Seleccionar ubicación POS"
-                  options={data.locations.map((location) => ({
+                  label="Ubicación"
+                  placeholder="Seleccionar ubicación"
+                  options={availableOpeningLocations.map((location) => ({
                     value: location.id,
-                    label: location.name,
+                    label: `${location.name} · ${location.type === "warehouse" ? "Almacén" : "POS"}`,
                   }))}
                   register={openForm.register("locationId", {
-                    required: "Selecciona un punto de venta",
+                    required: "Selecciona una ubicación",
                   })}
                   error={openForm.formState.errors.locationId}
                 />
-                {!data.locations.length && (
+                {!availableOpeningLocations.length && (
                   <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">
-                    Crea primero una ubicación de tipo Punto de venta.
+                    No hay otras ubicaciones disponibles para abrir caja.
                   </p>
                 )}
                 <div className="mt-4">
@@ -637,7 +804,7 @@ export function PosPage() {
                   <p className="mt-3 text-sm font-bold text-red-600">{error}</p>
                 )}
                 <button
-                  disabled={!online || !data.locations.length}
+                  disabled={!online || !availableOpeningLocations.length}
                   className="mt-5 w-full rounded-2xl bg-emerald-700 py-3 font-black text-white disabled:opacity-40"
                 >
                   Abrir caja
@@ -787,32 +954,76 @@ export function PosPage() {
                       <Trash2 size={18} />
                     </button>
                   </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => change(line.product, -1)}
-                        className="rounded-lg bg-red-50 p-1 text-red-700 hover:bg-red-100"
-                        aria-label={`Reducir cantidad de ${line.product.name}`}
-                      >
-                        <Minus size={16} />
-                      </button>
-                      <b>{line.quantity}</b>
-                      <button
-                        onClick={() => change(line.product, 1)}
-                        className="rounded-lg bg-emerald-50 p-1 text-emerald-700 hover:bg-emerald-100"
-                        aria-label={`Aumentar cantidad de ${line.product.name}`}
-                      >
-                        <Plus size={16} />
-                      </button>
+                  {isWarehouse ? (
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <label className="text-xs font-bold text-slate-500">
+                        Cantidad
+                        <input
+                          type="number"
+                          min="0.001"
+                          max={line.product.stock}
+                          step="any"
+                          value={line.quantity}
+                          onChange={(event) =>
+                            setQuantity(
+                              line.product,
+                              Number(event.target.value),
+                            )
+                          }
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-base font-black text-slate-900"
+                        />
+                      </label>
+                      <label className="text-xs font-bold text-slate-500">
+                        Precio unitario
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={appliedPrice(line.product) / 100}
+                          onChange={(event) =>
+                            setPriceOverrides((current) => ({
+                              ...current,
+                              [line.product.id]: Math.max(
+                                0,
+                                Math.round(Number(event.target.value) * 100),
+                              ),
+                            }))
+                          }
+                          className={`mt-1 w-full rounded-xl border px-3 py-2 text-base font-black text-slate-900 ${appliedPrice(line.product) !== standardPrice(line.product) ? "border-amber-400 bg-amber-50" : "border-slate-200"}`}
+                        />
+                      </label>
+                      <p className="col-span-2 flex justify-between text-xs text-slate-500">
+                        <span>
+                          Disponible: {line.product.stock} · Estándar:{" "}
+                          {money(standardPrice(line.product))}
+                        </span>
+                        <b className="text-sm text-slate-900">
+                          {money(appliedPrice(line.product) * line.quantity)}
+                        </b>
+                      </p>
                     </div>
-                    <b>
-                      {money(
-                        (payment === "cash"
-                          ? line.product.cashPriceCents
-                          : line.product.cardPriceCents) * line.quantity,
-                      )}
-                    </b>
-                  </div>
+                  ) : (
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => change(line.product, -1)}
+                          className="rounded-lg bg-red-50 p-1 text-red-700 hover:bg-red-100"
+                          aria-label={`Reducir cantidad de ${line.product.name}`}
+                        >
+                          <Minus size={16} />
+                        </button>
+                        <b>{line.quantity}</b>
+                        <button
+                          onClick={() => change(line.product, 1)}
+                          className="rounded-lg bg-emerald-50 p-1 text-emerald-700 hover:bg-emerald-100"
+                          aria-label={`Aumentar cantidad de ${line.product.name}`}
+                        >
+                          <Plus size={16} />
+                        </button>
+                      </div>
+                      <b>{money(appliedPrice(line.product) * line.quantity)}</b>
+                    </div>
+                  )}
                 </div>
               ))}
               {!lines.length && (
@@ -839,6 +1050,22 @@ export function PosPage() {
                   Tarjeta
                 </button>
               </div>
+              {isWarehouse && (
+                <label className="mt-4 block text-sm font-black text-slate-500">
+                  Nota de la venta
+                  <textarea
+                    value={saleNotes}
+                    maxLength={500}
+                    onChange={(event) => setSaleNotes(event.target.value)}
+                    placeholder={
+                      hasPriceOverrides
+                        ? "Obligatoria: explica el precio diferenciado"
+                        : "Cliente, referencia o detalle de la venta"
+                    }
+                    className={`mt-2 min-h-20 w-full rounded-xl border px-3 py-2 font-normal text-slate-900 outline-none ${hasPriceOverrides && !saleNotes.trim() ? "border-amber-400 bg-amber-50" : "border-slate-200"}`}
+                  />
+                </label>
+              )}
               <div className="mt-5 flex justify-between text-2xl font-black">
                 <span>Total</span>
                 <span>{money(total)}</span>
@@ -882,7 +1109,11 @@ export function PosPage() {
                 </div>
               )}
               <button
-                disabled={!lines.length || selling}
+                disabled={
+                  !lines.length ||
+                  selling ||
+                  (hasPriceOverrides && !saleNotes.trim())
+                }
                 onClick={() => void sell()}
                 className="mt-5 w-full rounded-2xl bg-emerald-700 py-3 font-black text-white disabled:opacity-40"
               >
@@ -931,7 +1162,10 @@ export function PosPage() {
               className="mx-auto my-6 w-full max-w-4xl rounded-3xl bg-white p-7"
             >
               <div className="flex justify-between">
-                <h2 className="text-2xl font-black">Cerrar caja</h2>
+                <h2 className="text-2xl font-black">
+                  Cerrar caja en{" "}
+                  {data.session?.locationName ?? "la ubicación seleccionada"}
+                </h2>
                 <button type="button" onClick={() => setClosing(false)}>
                   <X />
                 </button>

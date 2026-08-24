@@ -6,7 +6,12 @@ export type PendingSale = {
   operationId: string;
   expectedTotalCents: number;
   paymentMethod: "cash" | "card";
-  items: Array<{ productId: string; quantity: number }>;
+  notes?: string;
+  items: Array<{
+    productId: string;
+    quantity: number;
+    unitPriceCents?: number;
+  }>;
   createdAt: string;
   status: "pending" | "conflict";
   error?: string;
@@ -49,17 +54,27 @@ async function useStore<T>(
 
 export const posOffline = {
   saveSnapshot: (state: PosState, syncedAt = Date.now()) =>
-    useStore(snapshotStore, "readwrite", (store) =>
-      store.put({ state, syncedAt } satisfies Snapshot, "current"),
-    ),
-  snapshot: () =>
+    state.session
+      ? useStore(snapshotStore, "readwrite", (store) =>
+          store.put({ state, syncedAt } satisfies Snapshot, state.session!.id),
+        )
+      : Promise.resolve(undefined),
+  snapshot: (sessionId: string) =>
     useStore<Snapshot | undefined>(snapshotStore, "readonly", (store) =>
-      store.get("current"),
+      store.get(sessionId),
     ),
   putSale: (sale: PendingSale) =>
     useStore(outboxStore, "readwrite", (store) => store.put(sale)),
-  sales: () =>
-    useStore<PendingSale[]>(outboxStore, "readonly", (store) => store.getAll()),
+  sales: async (sessionId?: string) => {
+    const sales = await useStore<PendingSale[]>(
+      outboxStore,
+      "readonly",
+      (store) => store.getAll(),
+    );
+    return sessionId
+      ? sales.filter((sale) => sale.cashSessionId === sessionId)
+      : sales;
+  },
   removeSale: (operationId: string) =>
     useStore(outboxStore, "readwrite", (store) => store.delete(operationId)),
   clear: async () => {
