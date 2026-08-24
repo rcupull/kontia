@@ -9,7 +9,14 @@ export const posRoutes = new Hono<{
 }>();
 posRoutes.get("/state", async (c) => {
   const u = c.get("sessionUser");
-  return c.json(await new PosRepository(c.env.DB).state(u.businessId, u.id));
+  return c.json(
+    await new PosRepository(c.env.DB).state(
+      u.businessId,
+      u.id,
+      u.role !== "seller",
+      c.req.query("sessionId"),
+    ),
+  );
 });
 posRoutes.post(
   "/sessions",
@@ -31,14 +38,16 @@ posRoutes.post(
             u.id,
             values.locationId,
             values.openingAmountCents,
+            u.role !== "seller",
+            u.role !== "seller",
           ),
         },
         201,
       );
     } catch (e) {
       const messages: Record<string, string> = {
-        SESSION_ALREADY_OPEN: "Ya existe una caja abierta",
-        POS_LOCATION_NOT_FOUND: "Selecciona un punto de venta activo",
+        SESSION_ALREADY_OPEN: "Ya existe una caja abierta en esa ubicación",
+        POS_LOCATION_NOT_FOUND: "Selecciona una ubicación permitida y activa",
       };
       if (e instanceof Error && messages[e.message])
         return c.json({ error: messages[e.message] }, 409);
@@ -56,11 +65,13 @@ posRoutes.post(
       operationId: z.string().uuid(),
       createdAt: z.string().datetime({ offset: true }),
       expectedTotalCents: z.number().int().nonnegative(),
+      notes: z.string().trim().max(500).optional(),
       items: z
         .array(
           z.object({
             productId: z.string().uuid(),
             quantity: z.number().positive(),
+            unitPriceCents: z.number().int().nonnegative().optional(),
           }),
         )
         .min(1)
@@ -75,6 +86,7 @@ posRoutes.post(
           ...c.req.valid("json"),
           businessId: u.businessId,
           userId: u.id,
+          allowPriceOverride: u.role !== "seller",
         }),
         201,
       );
@@ -84,6 +96,10 @@ posRoutes.post(
         PRODUCT_NOT_FOUND: "Producto no encontrado",
         INSUFFICIENT_STOCK: "No hay existencia suficiente",
         PRICE_CHANGED: "Los precios cambiaron durante la desconexión",
+        PRICE_OVERRIDE_NOT_ALLOWED:
+          "Solo se pueden modificar precios en una caja de almacén",
+        SALE_NOTES_REQUIRED:
+          "Indica una nota para justificar el precio diferenciado",
         OFFLINE_PERIOD_EXPIRED: "La venta excede el período offline permitido",
       };
       if (e instanceof Error && messages[e.message])
@@ -92,23 +108,34 @@ posRoutes.post(
     }
   },
 );
-posRoutes.get("/orders", async (c) => {
-  const u = c.get("sessionUser");
-  try {
-    return c.json({
-      orders: await new PosRepository(c.env.DB).orders(u.businessId, u.id),
-    });
-  } catch (e) {
-    if (e instanceof Error && e.message === "SESSION_REQUIRED")
-      return c.json({ error: "No hay una caja abierta" }, 409);
-    throw e;
-  }
-});
+posRoutes.get(
+  "/orders",
+  zValidator("query", z.object({ sessionId: z.string().uuid() })),
+  async (c) => {
+    const u = c.get("sessionUser");
+    try {
+      return c.json({
+        orders: await new PosRepository(c.env.DB).orders(
+          u.businessId,
+          u.id,
+          c.req.valid("query").sessionId,
+        ),
+      });
+    } catch (e) {
+      if (e instanceof Error && e.message === "SESSION_REQUIRED")
+        return c.json({ error: "No hay una caja abierta" }, 409);
+      throw e;
+    }
+  },
+);
 posRoutes.post(
   "/orders/:id/refund",
   zValidator(
     "json",
-    z.object({ notes: z.string().trim().max(500).optional() }),
+    z.object({
+      sessionId: z.string().uuid(),
+      notes: z.string().trim().max(500).optional(),
+    }),
   ),
   async (c) => {
     const u = c.get("sessionUser");
@@ -117,6 +144,7 @@ posRoutes.post(
         await new PosRepository(c.env.DB).refund(
           u.businessId,
           u.id,
+          c.req.valid("json").sessionId,
           c.req.param("id"),
           c.req.valid("json").notes,
         ),
@@ -139,7 +167,10 @@ posRoutes.post(
   "/sessions/close",
   zValidator(
     "json",
-    z.object({ countedCashAmountCents: z.number().int().nonnegative() }),
+    z.object({
+      sessionId: z.string().uuid(),
+      countedCashAmountCents: z.number().int().nonnegative(),
+    }),
   ),
   async (c) => {
     const u = c.get("sessionUser");
@@ -148,6 +179,7 @@ posRoutes.post(
         await new PosRepository(c.env.DB).close(
           u.businessId,
           u.id,
+          c.req.valid("json").sessionId,
           c.req.valid("json").countedCashAmountCents,
         ),
       );

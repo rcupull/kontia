@@ -146,6 +146,8 @@ export type Sale = {
   createdAt: string;
   sellerName: string;
   locationName?: string;
+  locationType?: "warehouse" | "point_of_sale";
+  notes?: string;
   refundId?: string;
   refundNotes?: string;
   items: SaleItem[];
@@ -161,6 +163,7 @@ export type CashSession = {
   differenceCents?: number;
   sellerName: string;
   locationName?: string;
+  locationType?: "warehouse" | "point_of_sale";
   totalOrders: number;
   netSalesCents: number;
   cashSalesCents: number;

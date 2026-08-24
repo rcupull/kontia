@@ -6,12 +6,19 @@ type SaleInput = {
   createdAt: string;
   expectedTotalCents: number;
   paymentMethod: "cash" | "card";
-  items: Array<{ productId: string; quantity: number }>;
+  notes?: string;
+  allowPriceOverride: boolean;
+  items: Array<{
+    productId: string;
+    quantity: number;
+    unitPriceCents?: number;
+  }>;
 };
 type ActiveSession = {
   id: string;
   locationId: string;
   locationName: string;
+  locationType: "warehouse" | "point_of_sale";
   openingAmountCents: number;
   openedAt: string;
   status: "open" | "closed";
@@ -21,29 +28,45 @@ type ActiveSession = {
 const POS_OFFLINE_WINDOW_MS = 12 * 60 * 60 * 1000;
 export class PosRepository {
   constructor(private readonly db: D1Database) {}
-  private location(businessId: string, id: string) {
+  private location(businessId: string, id: string, allowWarehouse: boolean) {
     return this.db
       .prepare(
-        `SELECT id,name FROM locations WHERE id=? AND business_id=? AND type='point_of_sale' AND is_active=1 AND deleted_at IS NULL`,
+        `SELECT id,name,type FROM locations WHERE id=? AND business_id=? AND (type='point_of_sale' OR ?=1) AND is_active=1 AND deleted_at IS NULL`,
       )
-      .bind(id, businessId)
-      .first<{ id: string; name: string }>();
+      .bind(id, businessId, allowWarehouse ? 1 : 0)
+      .first<{
+        id: string;
+        name: string;
+        type: "warehouse" | "point_of_sale";
+      }>();
   }
-  private activeSession(businessId: string, userId: string) {
+  private sessions(businessId: string, userId: string) {
     return this.db
       .prepare(
-        `SELECT cs.id,cs.location_id AS locationId,l.name AS locationName,cs.opening_amount_cents AS openingAmountCents,cs.opened_at AS openedAt,cs.status,cs.closed_at AS closedAt,cs.offline_authorized_until AS offlineAuthorizedUntil FROM cash_sessions cs JOIN locations l ON l.id=cs.location_id AND l.business_id=cs.business_id WHERE cs.business_id=? AND cs.seller_id=? AND cs.status='open' AND cs.deleted_at IS NULL AND l.type='point_of_sale' AND l.is_active=1 AND l.deleted_at IS NULL ORDER BY cs.opened_at DESC LIMIT 1`,
+        `SELECT cs.id,cs.location_id AS locationId,l.name AS locationName,l.type AS locationType,cs.opening_amount_cents AS openingAmountCents,cs.opened_at AS openedAt,cs.status,cs.closed_at AS closedAt,cs.offline_authorized_until AS offlineAuthorizedUntil
+         FROM cash_sessions cs JOIN locations l ON l.id=cs.location_id AND l.business_id=cs.business_id
+         WHERE cs.business_id=? AND cs.seller_id=? AND cs.status='open' AND cs.deleted_at IS NULL AND l.is_active=1 AND l.deleted_at IS NULL
+         ORDER BY cs.opened_at DESC`,
       )
       .bind(businessId, userId)
-      .first<ActiveSession>();
+      .all<ActiveSession & { locationType: "warehouse" | "point_of_sale" }>();
   }
-  async state(businessId: string, userId: string) {
+  private async session(businessId: string, userId: string, sessionId: string) {
+    const result = await this.sessions(businessId, userId);
+    return result.results.find((session) => session.id === sessionId) ?? null;
+  }
+  async state(
+    businessId: string,
+    userId: string,
+    allowWarehouse: boolean,
+    requestedSessionId?: string,
+  ) {
     const [locationResult, categoryResult] = await Promise.all([
       this.db
         .prepare(
-          `SELECT id,name FROM locations WHERE business_id=? AND type='point_of_sale' AND is_active=1 AND deleted_at IS NULL ORDER BY name`,
+          `SELECT id,name,type FROM locations WHERE business_id=? AND (type='point_of_sale' OR ?=1) AND is_active=1 AND deleted_at IS NULL ORDER BY type,name`,
         )
-        .bind(businessId)
+        .bind(businessId, allowWarehouse ? 1 : 0)
         .all(),
       this.db
         .prepare(
@@ -55,7 +78,13 @@ export class PosRepository {
     ]);
     const locations = locationResult.results;
     const categories = categoryResult.results;
-    const active = await this.activeSession(businessId, userId);
+    const openSessions = (await this.sessions(businessId, userId)).results;
+    const active = requestedSessionId
+      ? (openSessions.find((session) => session.id === requestedSessionId) ??
+        null)
+      : openSessions.length === 1
+        ? openSessions[0]
+        : null;
     let session:
       | (ActiveSession & {
           expectedCashAmountCents: number;
@@ -96,12 +125,19 @@ export class PosRepository {
         )
         .bind(active.id)
         .first<Record<string, number>>();
+      const expectedCashAmountCents =
+        Number(active.openingAmountCents) +
+        Number(summary?.cashSalesCents ?? 0) -
+        Number(summary?.cashRefundsCents ?? 0);
+      await this.db
+        .prepare(
+          `UPDATE cash_sessions SET expected_cash_amount_cents=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND status='open'`,
+        )
+        .bind(expectedCashAmountCents, active.id, businessId)
+        .run();
       session = {
         ...active,
-        expectedCashAmountCents:
-          Number(active.openingAmountCents) +
-          Number(summary?.cashSalesCents ?? 0) -
-          Number(summary?.cashRefundsCents ?? 0),
+        expectedCashAmountCents,
         totalOrders: Number(summary?.totalOrders ?? 0),
         totalItems: Number(summary?.totalItems ?? 0),
         cashOrders: Number(summary?.cashOrders ?? 0),
@@ -130,26 +166,36 @@ export class PosRepository {
           .all()
       ).results;
     }
-    return { locations, categories, session, products };
+    return { locations, categories, openSessions, session, products };
   }
   async open(
     businessId: string,
     userId: string,
     locationId: string,
     openingAmountCents: number,
+    allowWarehouse: boolean,
+    allowMultiple: boolean,
   ) {
-    const location = await this.location(businessId, locationId);
+    const location = await this.location(
+      businessId,
+      locationId,
+      allowWarehouse,
+    );
     if (!location) throw new Error("POS_LOCATION_NOT_FOUND");
-    if (await this.activeSession(businessId, userId))
-      throw new Error("SESSION_ALREADY_OPEN");
     const id = crypto.randomUUID(),
       now = new Date().toISOString(),
       offlineAuthorizedUntil = new Date(
         Date.now() + POS_OFFLINE_WINDOW_MS,
       ).toISOString();
-    await this.db
+    const result = await this.db
       .prepare(
-        `INSERT INTO cash_sessions (id,business_id,seller_id,opening_amount_cents,expected_cash_amount_cents,status,opened_at,location_id,offline_authorized_until) VALUES (?,?,?,?,?,'open',?,?,?)`,
+        `INSERT INTO cash_sessions (id,business_id,seller_id,opening_amount_cents,expected_cash_amount_cents,status,opened_at,location_id,offline_authorized_until)
+         SELECT ?,?,?,?,?,'open',?,?,?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM cash_sessions
+           WHERE business_id=? AND seller_id=? AND status='open' AND deleted_at IS NULL
+             AND (?=0 OR location_id=?)
+         )`,
       )
       .bind(
         id,
@@ -160,8 +206,14 @@ export class PosRepository {
         now,
         location.id,
         offlineAuthorizedUntil,
+        businessId,
+        userId,
+        allowMultiple ? 1 : 0,
+        location.id,
       )
       .run();
+    if (Number(result.meta.changes) === 0)
+      throw new Error("SESSION_ALREADY_OPEN");
     return {
       id,
       locationId: location.id,
@@ -184,7 +236,7 @@ export class PosRepository {
     if (existing) return existing;
     const session = await this.db
       .prepare(
-        `SELECT cs.id,cs.location_id AS locationId,l.name AS locationName,
+        `SELECT cs.id,cs.location_id AS locationId,l.name AS locationName,l.type AS locationType,
           cs.opening_amount_cents AS openingAmountCents,cs.opened_at AS openedAt,
           cs.status,cs.closed_at AS closedAt,cs.offline_authorized_until AS offlineAuthorizedUntil
         FROM cash_sessions cs JOIN locations l ON l.id=cs.location_id
@@ -205,13 +257,27 @@ export class PosRepository {
     const saleId = crypto.randomUUID(),
       statements: D1PreparedStatement[] = [];
     let totalCents = 0;
-    const normalized = new Map<string, number>();
-    for (const item of input.items)
-      normalized.set(
-        item.productId,
-        (normalized.get(item.productId) ?? 0) + item.quantity,
-      );
-    for (const [productId, requested] of normalized) {
+    const normalized = new Map<
+      string,
+      { quantity: number; unitPriceCents?: number }
+    >();
+    for (const item of input.items) {
+      const current = normalized.get(item.productId);
+      if (
+        current &&
+        current.unitPriceCents !== undefined &&
+        item.unitPriceCents !== undefined &&
+        current.unitPriceCents !== item.unitPriceCents
+      )
+        throw new Error("PRICE_CHANGED");
+      normalized.set(item.productId, {
+        quantity: (current?.quantity ?? 0) + item.quantity,
+        unitPriceCents: item.unitPriceCents ?? current?.unitPriceCents,
+      });
+    }
+    const priceOverrides: Array<Record<string, unknown>> = [];
+    for (const [productId, requestedItem] of normalized) {
+      const requested = requestedItem.quantity;
       const product = await this.db
         .prepare(
           `SELECT id,name FROM products WHERE id=? AND business_id=? AND is_active=1 AND deleted_at IS NULL`,
@@ -232,11 +298,23 @@ export class PosRepository {
         }>();
       const first = batches.results[0];
       if (!first) throw new Error("INSUFFICIENT_STOCK");
-      const unitPriceCents = Number(
+      const standardPriceCents = Number(
         input.paymentMethod === "cash"
           ? first.cashPriceCents
           : first.cardPriceCents,
       );
+      const unitPriceCents = requestedItem.unitPriceCents ?? standardPriceCents;
+      if (unitPriceCents !== standardPriceCents) {
+        if (session.locationType !== "warehouse" || !input.allowPriceOverride)
+          throw new Error("PRICE_OVERRIDE_NOT_ALLOWED");
+        if (!input.notes?.trim()) throw new Error("SALE_NOTES_REQUIRED");
+        priceOverrides.push({
+          productId,
+          productName: product.name,
+          standardPriceCents,
+          unitPriceCents,
+        });
+      }
       let remaining = requested;
       for (const batch of batches.results) {
         if (remaining <= 0) break;
@@ -295,6 +373,21 @@ export class PosRepository {
     }
     if (totalCents !== input.expectedTotalCents)
       throw new Error("PRICE_CHANGED");
+    if (priceOverrides.length)
+      statements.push(
+        this.db
+          .prepare(
+            `INSERT INTO audit_logs (id,business_id,entity_type,entity_id,action,description,metadata,created_by_user_id)
+             VALUES (?,?,'sale',?,'priceOverride','Venta desde almacén con precio diferenciado',?,?)`,
+          )
+          .bind(
+            crypto.randomUUID(),
+            input.businessId,
+            saleId,
+            JSON.stringify({ notes: input.notes?.trim(), priceOverrides }),
+            input.userId,
+          ),
+      );
     statements.unshift(
       this.db
         .prepare(
@@ -337,12 +430,19 @@ export class PosRepository {
             input.userId,
           ),
       );
-    }
+    } else if (input.paymentMethod === "cash")
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE cash_sessions SET expected_cash_amount_cents=expected_cash_amount_cents+?,updated_at=datetime('now') WHERE id=? AND business_id=? AND status='open'`,
+          )
+          .bind(totalCents, session.id, input.businessId),
+      );
     await this.db.batch(statements);
     return { id: saleId, totalCents };
   }
-  async orders(businessId: string, userId: string) {
-    const session = await this.activeSession(businessId, userId);
+  async orders(businessId: string, userId: string, sessionId: string) {
+    const session = await this.session(businessId, userId, sessionId);
     if (!session) throw new Error("SESSION_REQUIRED");
     const result = await this.db
       .prepare(
@@ -360,17 +460,22 @@ export class PosRepository {
   async refund(
     businessId: string,
     userId: string,
+    sessionId: string,
     saleId: string,
     notes?: string,
   ) {
-    const session = await this.activeSession(businessId, userId);
+    const session = await this.session(businessId, userId, sessionId);
     if (!session) throw new Error("SESSION_REQUIRED");
     const sale = await this.db
       .prepare(
         `SELECT s.id,s.payment_method AS paymentMethod,s.total_cents AS totalCents FROM sales s WHERE s.id=? AND s.business_id=? AND s.cash_session_id=? AND s.deleted_at IS NULL`,
       )
       .bind(saleId, businessId, session.id)
-      .first();
+      .first<{
+        id: string;
+        paymentMethod: "cash" | "card";
+        totalCents: number;
+      }>();
     if (!sale) throw new Error("SALE_NOT_FOUND");
     if (
       await this.db
@@ -434,15 +539,24 @@ export class PosRepository {
           userId,
         ),
     );
+    if (sale.paymentMethod === "cash")
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE cash_sessions SET expected_cash_amount_cents=MAX(opening_amount_cents,expected_cash_amount_cents-?),updated_at=datetime('now') WHERE id=? AND business_id=? AND status='open'`,
+          )
+          .bind(sale.totalCents, session.id, businessId),
+      );
     await this.db.batch(statements);
     return { id: refundId };
   }
   async close(
     businessId: string,
     userId: string,
+    sessionId: string,
     countedCashAmountCents: number,
   ) {
-    const session = await this.activeSession(businessId, userId);
+    const session = await this.session(businessId, userId, sessionId);
     if (!session) throw new Error("SESSION_REQUIRED");
     const totals = await this.db
       .prepare(

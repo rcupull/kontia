@@ -7,19 +7,22 @@ export class AdminRepository {
       .prepare(
         `
       SELECT s.id,s.payment_method AS paymentMethod,s.total_cents AS totalCents,
-        s.created_at AS createdAt,u.display_name AS sellerName,l.name AS locationName,
+        s.created_at AS createdAt,u.display_name AS sellerName,l.name AS locationName,l.type AS locationType,
         r.id AS refundId,r.notes AS refundNotes,
+        (SELECT json_extract(a.metadata,'$.notes') FROM audit_logs a
+          WHERE a.business_id=s.business_id AND a.entity_type='sale' AND a.entity_id=s.id
+            AND a.action='priceOverride' AND a.deleted_at IS NULL ORDER BY a.created_at DESC LIMIT 1) AS notes,
         COALESCE((SELECT json_group_array(json_object('id',x.id,'productName',x.product_name,'quantity',x.quantity,'unitPriceCents',x.unit_price_cents,'totalCents',x.total_cents)) FROM
           (SELECT si.* FROM sale_items si WHERE si.sale_id=s.id AND si.deleted_at IS NULL ORDER BY si.created_at,si.id) x),'[]') AS items
       FROM sales s JOIN users u ON u.id=s.seller_id
       LEFT JOIN locations l ON l.id=s.location_id
       LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL
       WHERE s.business_id=? AND s.deleted_at IS NULL AND
-        (?='%%' OR u.display_name LIKE ? COLLATE NOCASE OR CAST(s.total_cents AS TEXT) LIKE ? OR EXISTS
+        (?='%%' OR u.display_name LIKE ? COLLATE NOCASE OR l.name LIKE ? COLLATE NOCASE OR CAST(s.total_cents AS TEXT) LIKE ? OR EXISTS
           (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND si.product_name LIKE ? COLLATE NOCASE))
       ORDER BY s.created_at DESC,s.id DESC LIMIT 500`,
       )
-      .bind(businessId, term, term, term, term)
+      .bind(businessId, term, term, term, term, term)
       .all<Record<string, unknown>>();
     return result.results.map((row) => ({
       ...row,
@@ -35,7 +38,7 @@ export class AdminRepository {
       SELECT cs.id,cs.status,cs.opened_at AS openedAt,cs.closed_at AS closedAt,
         cs.opening_amount_cents AS openingAmountCents,cs.expected_cash_amount_cents AS expectedCashAmountCents,
         cs.counted_cash_amount_cents AS countedCashAmountCents,cs.difference_cents AS differenceCents,
-        u.display_name AS sellerName,l.name AS locationName,
+        u.display_name AS sellerName,l.name AS locationName,l.type AS locationType,
         COUNT(DISTINCT s.id) AS totalOrders,
         COALESCE(SUM(CASE WHEN r.id IS NULL THEN s.total_cents ELSE 0 END),0) AS netSalesCents,
         COALESCE(SUM(CASE WHEN r.id IS NULL AND s.payment_method='cash' THEN s.total_cents ELSE 0 END),0) AS cashSalesCents,
