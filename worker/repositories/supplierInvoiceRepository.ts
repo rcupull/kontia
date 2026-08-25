@@ -17,6 +17,15 @@ export class SupplierInvoiceRepository {
         s.name AS supplierName, i.invoice_number AS invoiceNumber,
         i.invoice_date AS invoiceDate, i.total_amount_cents AS totalAmountCents,
         i.notes, i.created_at AS createdAt,
+        COALESCE((SELECT SUM(mc.base_amount_cents) FROM monetary_components mc
+          WHERE mc.business_id=i.business_id AND mc.operation_type='supplierInvoice'
+            AND mc.operation_id=i.id AND mc.flow='outflow'),0) AS paidAmountCents,
+        COALESCE((SELECT json_group_array(json_object('id',mc.id,'currencyCode',mc.currency_code,
+          'amountMinor',mc.amount_minor,'exchangeRateScaled',mc.exchange_rate_scaled,
+          'baseAmountCents',mc.base_amount_cents,'paymentMethod',mc.payment_method,'accountName',ma.name))
+          FROM monetary_components mc JOIN money_accounts ma ON ma.id=mc.money_account_id
+          WHERE mc.business_id=i.business_id AND mc.operation_type='supplierInvoice'
+            AND mc.operation_id=i.id AND mc.flow='outflow'),'[]') AS payments,
         COUNT(DISTINCT b.id) AS batchCount,
         COALESCE(SUM(CASE
           WHEN m.movement_type='negativeAdjustment' THEN -(m.quantity*b.unit_cost_cents)
@@ -33,7 +42,14 @@ export class SupplierInvoiceRepository {
       )
       .bind(businessId, term, term, term)
       .all();
-    return result.results;
+    return result.results.map((row) => ({
+      ...row,
+      pendingAmountCents: Math.max(
+        0,
+        Number(row.totalAmountCents) - Number(row.paidAmountCents),
+      ),
+      payments: JSON.parse(String(row.payments ?? "[]")),
+    }));
   }
 
   async reconciliation(businessId: string, invoiceId: string) {
@@ -120,4 +136,49 @@ export class SupplierInvoiceRepository {
       .run();
     return Number(result.meta.changes) > 0;
   }
+
+  async addPayment(
+    businessId: string,
+    userId: string,
+    invoiceId: string,
+    paymentDate: string,
+    components: MonetaryComponentInput[],
+  ) {
+    const invoice = await this.db
+      .prepare(
+        `SELECT i.total_amount_cents AS totalAmountCents,
+       COALESCE((SELECT SUM(base_amount_cents) FROM monetary_components
+         WHERE business_id=i.business_id AND operation_type='supplierInvoice'
+           AND operation_id=i.id AND flow='outflow'),0) AS paidAmountCents
+       FROM supplier_invoices i WHERE i.id=? AND i.business_id=? AND i.deleted_at IS NULL`,
+      )
+      .bind(invoiceId, businessId)
+      .first<{ totalAmountCents: number; paidAmountCents: number }>();
+    if (!invoice) throw new Error("INVOICE_NOT_FOUND");
+    const paymentTotal = components.reduce(
+      (sum, row) => sum + row.baseAmountCents,
+      0,
+    );
+    const pending =
+      Number(invoice.totalAmountCents) - Number(invoice.paidAmountCents);
+    if (paymentTotal > pending) throw new Error("PAYMENT_EXCEEDS_BALANCE");
+    const money = new MoneyRepository(this.db);
+    await money.validateComponents(businessId, components, paymentTotal);
+    await this.db.batch(
+      money.componentStatements(
+        businessId,
+        userId,
+        "supplierInvoice",
+        invoiceId,
+        "outflow",
+        components,
+        paymentDate,
+      ),
+    );
+    return pending - paymentTotal;
+  }
 }
+import {
+  MoneyRepository,
+  type MonetaryComponentInput,
+} from "./moneyRepository";

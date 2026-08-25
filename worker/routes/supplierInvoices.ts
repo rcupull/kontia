@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { SupplierInvoiceRepository } from "../repositories/supplierInvoiceRepository";
 import type { Bindings, Variables } from "../types";
+import { monetaryComponentSchema, moneyError } from "./money";
 
 export const supplierInvoiceRoutes = new Hono<{
   Bindings: Bindings;
@@ -61,3 +62,37 @@ supplierInvoiceRoutes.put("/:id", zValidator("json", input), async (c) => {
     throw error;
   }
 });
+
+supplierInvoiceRoutes.post(
+  "/:id/payments",
+  zValidator(
+    "json",
+    z.object({
+      paymentDate: z.string().datetime({ offset: true }),
+      components: z.array(monetaryComponentSchema).min(1).max(12),
+    }),
+  ),
+  async (c) => {
+    const user = c.get("sessionUser");
+    try {
+      const pendingAmountCents = await new SupplierInvoiceRepository(
+        c.env.DB,
+      ).addPayment(
+        user.businessId,
+        user.id,
+        c.req.param("id"),
+        c.req.valid("json").paymentDate,
+        c.req.valid("json").components,
+      );
+      return c.json({ pendingAmountCents }, 201);
+    } catch (error) {
+      if (error instanceof Error && error.message === "INVOICE_NOT_FOUND")
+        return c.json({ error: "Factura no encontrada" }, 404);
+      if (error instanceof Error && error.message === "PAYMENT_EXCEEDS_BALANCE")
+        return c.json({ error: "El pago excede el saldo pendiente" }, 409);
+      const message = moneyError(error);
+      if (message) return c.json({ error: message }, 409);
+      throw error;
+    }
+  },
+);

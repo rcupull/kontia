@@ -26,6 +26,18 @@ export class BusinessRepository {
       )
       .bind(input.name, input.currency, input.salesTaxPercentage, businessId)
       .run();
-    return Number(result.meta.changes) > 0;
+    if (Number(result.meta.changes) <= 0) return false;
+    const active = await this.db
+      .prepare(
+        `SELECT currency_code AS currencyCode FROM business_currencies WHERE business_id=? AND is_active=1`,
+      )
+      .bind(businessId)
+      .all<{ currencyCode: string }>();
+    await new MoneyRepository(this.db).configureCurrencies(businessId, [
+      ...active.results.map((row) => row.currencyCode),
+      input.currency,
+    ]);
+    return true;
   }
 }
+import { MoneyRepository } from "./moneyRepository";

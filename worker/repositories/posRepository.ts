@@ -1,3 +1,8 @@
+import {
+  MoneyRepository,
+  type MonetaryComponentInput,
+} from "./moneyRepository";
+
 type SaleInput = {
   businessId: string;
   userId: string;
@@ -8,6 +13,7 @@ type SaleInput = {
   paymentMethod: "cash" | "card";
   notes?: string;
   allowPriceOverride: boolean;
+  payments?: MonetaryComponentInput[];
   items: Array<{
     productId: string;
     quantity: number;
@@ -61,13 +67,14 @@ export class PosRepository {
     allowWarehouse: boolean,
     requestedSessionId?: string,
   ) {
-    const [locationResult, categoryResult] = await Promise.all([
+    const [locationResult, moneySettings, categoryResult] = await Promise.all([
       this.db
         .prepare(
           `SELECT id,name,type FROM locations WHERE business_id=? AND (type='point_of_sale' OR ?=1) AND is_active=1 AND deleted_at IS NULL ORDER BY type,name`,
         )
         .bind(businessId, allowWarehouse ? 1 : 0)
         .all(),
+      new MoneyRepository(this.db).settings(businessId),
       this.db
         .prepare(
           `SELECT id,name,COALESCE(icon,'🛒') AS icon FROM categories
@@ -96,6 +103,7 @@ export class PosRepository {
           cardSalesCents: number;
           cashRefundsCents: number;
           cardRefundsCents: number;
+          balances: unknown[];
         })
       | null = null;
     let products: unknown[] = [];
@@ -114,30 +122,36 @@ export class PosRepository {
         .prepare(
           `SELECT COUNT(*) AS totalOrders,
           COALESCE(SUM((SELECT COALESCE(SUM(si.quantity),0) FROM sale_items si WHERE si.sale_id=s.id AND si.deleted_at IS NULL)),0) AS totalItems,
-          COALESCE(SUM(CASE WHEN s.payment_method='cash' THEN 1 ELSE 0 END),0) AS cashOrders,
-          COALESCE(SUM(CASE WHEN s.payment_method='card' THEN 1 ELSE 0 END),0) AS cardOrders,
-          COALESCE(SUM(CASE WHEN s.payment_method='cash' THEN s.total_cents ELSE 0 END),0) AS cashSalesCents,
-          COALESCE(SUM(CASE WHEN s.payment_method='card' THEN s.total_cents ELSE 0 END),0) AS cardSalesCents,
-          COALESCE(SUM(CASE WHEN s.payment_method='cash' AND r.id IS NOT NULL THEN s.total_cents ELSE 0 END),0) AS cashRefundsCents,
-          COALESCE(SUM(CASE WHEN s.payment_method='card' AND r.id IS NOT NULL THEN s.total_cents ELSE 0 END),0) AS cardRefundsCents
+          COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash') THEN 1 ELSE 0 END),0) AS cashOrders,
+          COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash') THEN 1 ELSE 0 END),0) AS cardOrders,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash')),0) AS cashSalesCents,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash')),0) AS cardSalesCents,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method='cash')),0) AS cashRefundsCents,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method<>'cash')),0) AS cardRefundsCents
           FROM sales s LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL
           WHERE s.cash_session_id=? AND s.deleted_at IS NULL`,
         )
         .bind(active.id)
         .first<Record<string, number>>();
-      const expectedCashAmountCents =
-        Number(active.openingAmountCents) +
-        Number(summary?.cashSalesCents ?? 0) -
-        Number(summary?.cashRefundsCents ?? 0);
-      await this.db
-        .prepare(
-          `UPDATE cash_sessions SET expected_cash_amount_cents=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND status='open'`,
-        )
-        .bind(expectedCashAmountCents, active.id, businessId)
-        .run();
+      const balanceRows = (
+        await this.db
+          .prepare(
+            `SELECT currency_code AS currencyCode,opening_amount_minor AS openingAmountMinor,
+           expected_amount_minor AS expectedAmountMinor,counted_amount_minor AS countedAmountMinor,
+           difference_amount_minor AS differenceAmountMinor
+           FROM cash_session_currency_balances WHERE cash_session_id=? ORDER BY currency_code`,
+          )
+          .bind(active.id)
+          .all<Record<string, unknown>>()
+      ).results;
+      const baseBalance = balanceRows.find(
+        (row) => row.currencyCode === moneySettings.baseCurrency,
+      );
       session = {
         ...active,
-        expectedCashAmountCents,
+        expectedCashAmountCents: Number(
+          baseBalance?.expectedAmountMinor ?? active.openingAmountCents,
+        ),
         totalOrders: Number(summary?.totalOrders ?? 0),
         totalItems: Number(summary?.totalItems ?? 0),
         cashOrders: Number(summary?.cashOrders ?? 0),
@@ -146,6 +160,7 @@ export class PosRepository {
         cardSalesCents: Number(summary?.cardSalesCents ?? 0),
         cashRefundsCents: Number(summary?.cashRefundsCents ?? 0),
         cardRefundsCents: Number(summary?.cardRefundsCents ?? 0),
+        balances: balanceRows,
       };
       products = (
         await this.db
@@ -166,7 +181,14 @@ export class PosRepository {
           .all()
       ).results;
     }
-    return { locations, categories, openSessions, session, products };
+    return {
+      locations,
+      categories,
+      openSessions,
+      ...moneySettings,
+      session,
+      products,
+    };
   }
   async open(
     businessId: string,
@@ -175,6 +197,7 @@ export class PosRepository {
     openingAmountCents: number,
     allowWarehouse: boolean,
     allowMultiple: boolean,
+    openingBalances?: Array<{ currencyCode: string; amountMinor: number }>,
   ) {
     const location = await this.location(
       businessId,
@@ -182,48 +205,92 @@ export class PosRepository {
       allowWarehouse,
     );
     if (!location) throw new Error("POS_LOCATION_NOT_FOUND");
+    const existing = await this.db
+      .prepare(
+        `SELECT id FROM cash_sessions WHERE business_id=? AND seller_id=? AND status='open'
+       AND deleted_at IS NULL AND (?=0 OR location_id=?) LIMIT 1`,
+      )
+      .bind(businessId, userId, allowMultiple ? 1 : 0, location.id)
+      .first();
+    if (existing) throw new Error("SESSION_ALREADY_OPEN");
     const id = crypto.randomUUID(),
       now = new Date().toISOString(),
       offlineAuthorizedUntil = new Date(
         Date.now() + POS_OFFLINE_WINDOW_MS,
       ).toISOString();
-    const result = await this.db
-      .prepare(
-        `INSERT INTO cash_sessions (id,business_id,seller_id,opening_amount_cents,expected_cash_amount_cents,status,opened_at,location_id,offline_authorized_until)
-         SELECT ?,?,?,?,?,'open',?,?,?
-         WHERE NOT EXISTS (
-           SELECT 1 FROM cash_sessions
-           WHERE business_id=? AND seller_id=? AND status='open' AND deleted_at IS NULL
-             AND (?=0 OR location_id=?)
-         )`,
-      )
-      .bind(
-        id,
-        businessId,
-        userId,
-        openingAmountCents,
-        openingAmountCents,
-        now,
-        location.id,
-        offlineAuthorizedUntil,
-        businessId,
-        userId,
-        allowMultiple ? 1 : 0,
-        location.id,
-      )
-      .run();
-    if (Number(result.meta.changes) === 0)
+    const business = await this.db
+      .prepare(`SELECT upper(currency) currency FROM businesses WHERE id=?`)
+      .bind(businessId)
+      .first<{ currency: string }>();
+    const balances = openingBalances?.length
+      ? openingBalances
+      : [
+          {
+            currencyCode: business?.currency ?? "CUP",
+            amountMinor: openingAmountCents,
+          },
+        ];
+    if (!balances.some((row) => row.currencyCode === business?.currency))
+      balances.push({
+        currencyCode: business?.currency ?? "CUP",
+        amountMinor: 0,
+      });
+    const statements: D1PreparedStatement[] = [
+      this.db
+        .prepare(
+          `INSERT INTO cash_sessions (id,business_id,seller_id,opening_amount_cents,expected_cash_amount_cents,status,opened_at,location_id,offline_authorized_until)
+           VALUES (?,?,?,?,?,'open',?,?,?)`,
+        )
+        .bind(
+          id,
+          businessId,
+          userId,
+          openingAmountCents,
+          openingAmountCents,
+          now,
+          location.id,
+          offlineAuthorizedUntil,
+        ),
+    ];
+    for (const row of balances)
+      statements.push(
+        this.db
+          .prepare(
+            `INSERT INTO cash_session_currency_balances
+             (cash_session_id,business_id,currency_code,opening_amount_minor,expected_amount_minor)
+             SELECT ?,?,?,?,? WHERE EXISTS (
+               SELECT 1 FROM business_currencies WHERE business_id=? AND currency_code=? AND is_active=1
+             )`,
+          )
+          .bind(
+            id,
+            businessId,
+            row.currencyCode,
+            row.amountMinor,
+            row.amountMinor,
+            businessId,
+            row.currencyCode,
+          ),
+      );
+    const results = await this.db.batch(statements);
+    if (Number(results[0]?.meta.changes ?? 0) === 0)
       throw new Error("SESSION_ALREADY_OPEN");
     return {
       id,
       locationId: location.id,
       locationName: location.name,
+      locationType: location.type,
       openingAmountCents,
       expectedCashAmountCents: openingAmountCents,
       openedAt: now,
       status: "open" as const,
       closedAt: null,
       offlineAuthorizedUntil,
+      balances: balances.map((row) => ({
+        ...row,
+        openingAmountMinor: row.amountMinor,
+        expectedAmountMinor: row.amountMinor,
+      })),
     };
   }
   async sale(input: SaleInput) {
@@ -388,6 +455,31 @@ export class PosRepository {
             input.userId,
           ),
       );
+    const money = new MoneyRepository(this.db);
+    const settings = await money.settings(input.businessId);
+    let payments = input.payments;
+    if (totalCents === 0) payments = [];
+    else if (!payments?.length) {
+      const baseAccount = settings.accounts.find(
+        (account) =>
+          String(account.currencyCode) === settings.baseCurrency &&
+          String(account.accountType) ===
+            (input.paymentMethod === "cash" ? "cashDrawer" : "bankAccount"),
+      );
+      if (!baseAccount) throw new Error("MONEY_ACCOUNT_NOT_FOUND");
+      payments = [
+        {
+          moneyAccountId: String(baseAccount.id),
+          paymentMethod: input.paymentMethod,
+          currencyCode: settings.baseCurrency,
+          amountMinor: totalCents,
+          exchangeRateScaled: 1000000,
+          baseAmountCents: totalCents,
+        },
+      ];
+    }
+    if (totalCents > 0)
+      await money.validateComponents(input.businessId, payments, totalCents);
     statements.unshift(
       this.db
         .prepare(
@@ -405,6 +497,35 @@ export class PosRepository {
           input.createdAt,
         ),
     );
+    statements.push(
+      ...money.componentStatements(
+        input.businessId,
+        input.userId,
+        "sale",
+        saleId,
+        "inflow",
+        payments,
+        input.createdAt,
+        session.id,
+      ),
+    );
+    for (const row of payments.filter((item) => item.paymentMethod === "cash"))
+      statements.push(
+        this.db
+          .prepare(
+            `INSERT INTO cash_session_currency_balances
+             (cash_session_id,business_id,currency_code,expected_amount_minor)
+             VALUES (?,?,?,?) ON CONFLICT(cash_session_id,currency_code)
+             DO UPDATE SET expected_amount_minor=expected_amount_minor+excluded.expected_amount_minor,
+               updated_at=datetime('now')`,
+          )
+          .bind(
+            session.id,
+            input.businessId,
+            row.currencyCode,
+            row.amountMinor,
+          ),
+      );
     if (session.status === "closed") {
       if (input.paymentMethod === "cash")
         statements.push(
@@ -447,6 +568,10 @@ export class PosRepository {
     const result = await this.db
       .prepare(
         `SELECT s.id,s.payment_method AS paymentMethod,s.total_cents AS totalCents,s.created_at AS createdAt,r.id AS refundId,r.notes AS refundNotes,
+      COALESCE((SELECT json_group_array(json_object('id',m.id,'paymentMethod',m.payment_method,
+        'currencyCode',m.currency_code,'amountMinor',m.amount_minor,'exchangeRateScaled',m.exchange_rate_scaled,
+        'baseAmountCents',m.base_amount_cents)) FROM monetary_components m
+        WHERE m.operation_type='sale' AND m.operation_id=s.id),'[]') AS payments,
       COALESCE((SELECT json_group_array(json_object('id',x.id,'productName',x.product_name,'quantity',x.quantity,'unitPriceCents',x.unit_price_cents,'totalCents',x.total_cents)) FROM (SELECT si.* FROM sale_items si WHERE si.sale_id=s.id AND si.deleted_at IS NULL ORDER BY si.created_at,si.id) x),'[]') AS items
       FROM sales s LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL WHERE s.business_id=? AND s.cash_session_id=? AND s.deleted_at IS NULL ORDER BY s.created_at DESC,s.id DESC`,
       )
@@ -455,6 +580,7 @@ export class PosRepository {
     return result.results.map((row) => ({
       ...row,
       items: JSON.parse(String(row.items ?? "[]")),
+      payments: JSON.parse(String(row.payments ?? "[]")),
     }));
   }
   async refund(
@@ -502,6 +628,48 @@ export class PosRepository {
           )
           .bind(refundId, businessId, saleId, userId, notes ?? ""),
       ];
+    const originalPayments = await this.db
+      .prepare(
+        `SELECT money_account_id AS moneyAccountId,payment_method AS paymentMethod,
+          currency_code AS currencyCode,amount_minor AS amountMinor,
+          exchange_rate_scaled AS exchangeRateScaled,base_amount_cents AS baseAmountCents
+         FROM monetary_components WHERE business_id=? AND operation_type='sale'
+           AND operation_id=? AND flow='inflow'`,
+      )
+      .bind(businessId, saleId)
+      .all<MonetaryComponentInput>();
+    const money = new MoneyRepository(this.db);
+    statements.push(
+      ...money.componentStatements(
+        businessId,
+        userId,
+        "saleRefund",
+        refundId,
+        "outflow",
+        originalPayments.results,
+        new Date().toISOString(),
+        session.id,
+      ),
+    );
+    for (const row of originalPayments.results.filter(
+      (item) => item.paymentMethod === "cash",
+    ))
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE cash_session_currency_balances SET
+           expected_amount_minor=expected_amount_minor-?,updated_at=datetime('now')
+           WHERE cash_session_id=? AND business_id=? AND currency_code=?
+             AND expected_amount_minor>=?`,
+          )
+          .bind(
+            row.amountMinor,
+            session.id,
+            businessId,
+            row.currencyCode,
+            row.amountMinor,
+          ),
+      );
     for (const row of allocations.results)
       statements.push(
         this.db
@@ -539,14 +707,6 @@ export class PosRepository {
           userId,
         ),
     );
-    if (sale.paymentMethod === "cash")
-      statements.push(
-        this.db
-          .prepare(
-            `UPDATE cash_sessions SET expected_cash_amount_cents=MAX(opening_amount_cents,expected_cash_amount_cents-?),updated_at=datetime('now') WHERE id=? AND business_id=? AND status='open'`,
-          )
-          .bind(sale.totalCents, session.id, businessId),
-      );
     await this.db.batch(statements);
     return { id: refundId };
   }
@@ -555,18 +715,40 @@ export class PosRepository {
     userId: string,
     sessionId: string,
     countedCashAmountCents: number,
+    countedBalances?: Array<{ currencyCode: string; amountMinor: number }>,
   ) {
     const session = await this.session(businessId, userId, sessionId);
     if (!session) throw new Error("SESSION_REQUIRED");
     const totals = await this.db
       .prepare(
-        `SELECT COALESCE(SUM(CASE WHEN s.payment_method='cash' AND r.id IS NULL THEN s.total_cents ELSE 0 END),0) cash,COALESCE(SUM(CASE WHEN s.payment_method='card' AND r.id IS NULL THEN s.total_cents ELSE 0 END),0) card FROM sales s LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL WHERE s.cash_session_id=? AND s.deleted_at IS NULL`,
+        `SELECT
+          COALESCE(SUM(CASE WHEN payment_method='cash' AND flow='inflow' THEN base_amount_cents WHEN payment_method='cash' THEN -base_amount_cents ELSE 0 END),0) cash,
+          COALESCE(SUM(CASE WHEN payment_method<>'cash' AND flow='inflow' THEN base_amount_cents WHEN payment_method<>'cash' THEN -base_amount_cents ELSE 0 END),0) card
+         FROM monetary_components WHERE business_id=? AND cash_session_id=?
+           AND operation_type IN ('sale','saleRefund')`,
       )
-      .bind(session.id)
+      .bind(businessId, session.id)
       .first<{ cash: number; card: number }>();
     const cash = Number(totals?.cash ?? 0),
       card = Number(totals?.card ?? 0),
-      expected = Number(session.openingAmountCents) + cash,
+      baseCurrency =
+        (
+          await this.db
+            .prepare(
+              `SELECT upper(currency) currency FROM businesses WHERE id=?`,
+            )
+            .bind(businessId)
+            .first<{ currency: string }>()
+        )?.currency ?? "CUP",
+      baseBalance = await this.db
+        .prepare(
+          `SELECT expected_amount_minor AS expectedAmountMinor FROM cash_session_currency_balances WHERE cash_session_id=? AND currency_code=?`,
+        )
+        .bind(session.id, baseCurrency)
+        .first<{ expectedAmountMinor: number }>(),
+      expected = Number(
+        baseBalance?.expectedAmountMinor ?? session.openingAmountCents,
+      ),
       now = new Date().toISOString(),
       statements = [
         this.db
@@ -582,6 +764,34 @@ export class PosRepository {
             businessId,
           ),
       ];
+    const business = await this.db
+      .prepare(`SELECT upper(currency) currency FROM businesses WHERE id=?`)
+      .bind(businessId)
+      .first<{ currency: string }>();
+    const counts = countedBalances?.length
+      ? countedBalances
+      : [
+          {
+            currencyCode: business?.currency ?? "CUP",
+            amountMinor: countedCashAmountCents,
+          },
+        ];
+    for (const row of counts)
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE cash_session_currency_balances SET counted_amount_minor=?,
+           difference_amount_minor=?-expected_amount_minor,updated_at=datetime('now')
+           WHERE cash_session_id=? AND business_id=? AND currency_code=?`,
+          )
+          .bind(
+            row.amountMinor,
+            row.amountMinor,
+            session.id,
+            businessId,
+            row.currencyCode,
+          ),
+      );
     if (cash > 0)
       statements.push(
         this.db
@@ -602,6 +812,17 @@ export class PosRepository {
     return {
       expectedCashAmountCents: expected,
       differenceCents: countedCashAmountCents - expected,
+      balances: (
+        await this.db
+          .prepare(
+            `SELECT currency_code AS currencyCode,opening_amount_minor AS openingAmountMinor,
+           expected_amount_minor AS expectedAmountMinor,counted_amount_minor AS countedAmountMinor,
+           difference_amount_minor AS differenceAmountMinor
+           FROM cash_session_currency_balances WHERE cash_session_id=? ORDER BY currency_code`,
+          )
+          .bind(session.id)
+          .all()
+      ).results,
     };
   }
 }

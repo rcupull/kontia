@@ -25,11 +25,12 @@ import {
   subWeeks,
 } from "date-fns";
 import { api, type DashboardMetrics } from "../api";
+import type { MoneySettings } from "../types";
 import { Chart, type ChartData } from "../components/chart";
 import { PageSpinner } from "../components/Spinner";
 
 type DashboardData = Awaited<ReturnType<typeof api.dashboard>>;
-type Tab = "general" | "products" | "finance" | "inventory";
+type Tab = "general" | "products" | "finance" | "accounts" | "inventory";
 type RangeKey = "all" | "thisMonth" | "lastMonth" | "thisWeek" | "lastWeek";
 const money = (value: number) =>
   new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
@@ -548,6 +549,115 @@ function Finance({ data }: { data: DashboardData }) {
   );
 }
 
+const accountOperationLabels: Record<string, string> = {
+  sale: "Ventas",
+  saleRefund: "Reintegros de ventas",
+  supplierInvoice: "Compras a proveedores",
+  financialMovement: "Movimientos financieros",
+  currencyExchange: "Cambios de moneda",
+};
+
+function Accounts({ settings }: { settings: MoneySettings }) {
+  const reconciliation = settings.cashReconciliation ?? [],
+    currencies = settings.currencies
+      .filter((row) => row.isActive)
+      .map((row) => row.currencyCode),
+    balances = currencies.map((currencyCode) => {
+      const rows = reconciliation.filter(
+          (row) => row.currencyCode === currencyCode,
+        ),
+        inflowMinor = rows.reduce((sum, row) => sum + row.inflowMinor, 0),
+        outflowMinor = rows.reduce((sum, row) => sum + row.outflowMinor, 0);
+      return {
+        currencyCode,
+        inflowMinor,
+        outflowMinor,
+        balanceMinor: inflowMinor - outflowMinor,
+      };
+    }),
+    totalBaseCents = reconciliation.reduce(
+      (sum, row) =>
+        sum + Number(row.inflowBaseCents) - Number(row.outflowBaseCents),
+      0,
+    );
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {balances.map((row) => (
+          <div
+            key={row.currencyCode}
+            className="rounded-3xl bg-white p-5 shadow-sm"
+          >
+            <div className="flex items-center gap-2 text-sm font-black uppercase text-emerald-700">
+              <Banknote size={18} /> Efectivo {row.currencyCode}
+            </div>
+            <p className="mt-3 text-3xl font-black">
+              {(row.balanceMinor / 100).toLocaleString("es")} {row.currencyCode}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Entradas {(row.inflowMinor / 100).toLocaleString("es")} · Salidas{" "}
+              {(row.outflowMinor / 100).toLocaleString("es")}
+            </p>
+          </div>
+        ))}
+        <Card
+          title={`Total equivalente en ${settings.baseCurrency}`}
+          value={money(totalBaseCents)}
+          icon={<WalletCards />}
+          tone="violet"
+        />
+      </div>
+      <div className="overflow-x-auto rounded-3xl bg-white shadow-sm">
+        <div className="border-b px-5 py-4">
+          <h2 className="text-lg font-black">Conciliación de efectivo</h2>
+          <p className="text-sm text-slate-500">
+            Saldo acumulado de operaciones históricas y actuales.
+          </p>
+        </div>
+        <table className="w-full min-w-[650px] text-left">
+          <thead className="text-xs uppercase text-slate-400">
+            <tr>
+              <th className="px-5 py-4">Moneda</th>
+              <th>Origen</th>
+              <th>Entradas</th>
+              <th>Salidas</th>
+              <th>Saldo neto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reconciliation.map((row) => (
+              <tr
+                key={`${row.currencyCode}-${row.operationType}`}
+                className="border-t"
+              >
+                <td className="px-5 py-4 font-black">{row.currencyCode}</td>
+                <td>
+                  {accountOperationLabels[row.operationType] ??
+                    row.operationType}
+                </td>
+                <td className="font-bold text-emerald-700">
+                  {(row.inflowMinor / 100).toLocaleString("es")}{" "}
+                  {row.currencyCode}
+                </td>
+                <td className="font-bold text-red-600">
+                  {(row.outflowMinor / 100).toLocaleString("es")}{" "}
+                  {row.currencyCode}
+                </td>
+                <td className="font-black">
+                  {((row.inflowMinor - row.outflowMinor) / 100).toLocaleString(
+                    "es",
+                  )}{" "}
+                  {row.currencyCode}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Inventory({ data }: { data: DashboardData }) {
   const warehouses = data.inventory.locations
       .filter((l) => l.type === "warehouse")
@@ -725,6 +835,7 @@ export function DashboardPage() {
   const [tab, setTab] = useState<Tab>("general"),
     [range, setRange] = useState<RangeKey>("all"),
     [data, setData] = useState<DashboardData | null>(null),
+    [moneySettings, setMoneySettings] = useState<MoneySettings | null>(null),
     [error, setError] = useState(""),
     [selectedMetrics, setSelectedMetrics] =
       useState<MetricKey[]>(storedMetricKeys),
@@ -732,10 +843,13 @@ export function DashboardPage() {
   const dates = useMemo(() => rangeFor(range), [range]);
   useEffect(() => {
     setData(null);
+    setMoneySettings(null);
     setError("");
-    void api
-      .dashboard(dates.from, dates.to)
-      .then(setData)
+    void Promise.all([api.dashboard(dates.from, dates.to), api.moneySettings()])
+      .then(([dashboard, money]) => {
+        setData(dashboard);
+        setMoneySettings(money);
+      })
       .catch((reason) =>
         setError(
           reason instanceof Error
@@ -751,6 +865,7 @@ export function DashboardPage() {
       ["general", "General"],
       ["products", "Productos"],
       ["finance", "Finanzas"],
+      ["accounts", "Cuentas"],
       ["inventory", "Inventario"],
     ],
     ranges: Array<[RangeKey, string]> = [
@@ -809,8 +924,10 @@ export function DashboardPage() {
           {error}
         </p>
       )}
-      {!data && !error && <PageSpinner label="Calculando indicadores…" />}
-      {data && (
+      {(!data || !moneySettings) && !error && (
+        <PageSpinner label="Calculando indicadores…" />
+      )}
+      {data && moneySettings && (
         <div className="mt-6">
           {tab === "general" && (
             <General data={data} selected={selectedMetrics} />
@@ -819,6 +936,7 @@ export function DashboardPage() {
             <Products data={data} selected={selectedMetrics} />
           )}
           {tab === "finance" && <Finance data={data} />}
+          {tab === "accounts" && <Accounts settings={moneySettings} />}
           {tab === "inventory" && <Inventory data={data} />}
         </div>
       )}

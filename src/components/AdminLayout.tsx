@@ -23,6 +23,7 @@ import {
   Wrench,
   X,
   MapPin,
+  ArrowLeftRight,
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { api } from "../api";
@@ -41,6 +42,7 @@ const sections = [
   { to: "/admin/orders", label: "Ventas", icon: Receipt },
   { to: "/admin/cash-sessions", label: "Sesiones de caja", icon: WalletCards },
   { to: "/admin/financial-movements", label: "Finanzas", icon: BarChart3 },
+  { to: "/admin/money", label: "Cambios de moneda", icon: ArrowLeftRight },
   { to: "/admin/users", label: "Usuarios", icon: Users },
   { to: "/admin/businesses", label: "Negocios", icon: Store },
   { to: "/admin/maintenance", label: "Mantenimiento", icon: Wrench },

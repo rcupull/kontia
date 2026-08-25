@@ -11,6 +11,7 @@ import { adminRoutes } from "./routes/admin";
 import { posRoutes } from "./routes/pos";
 import { userRoutes } from "./routes/users";
 import { businessRoutes } from "./routes/businesses";
+import { moneyRoutes } from "./routes/money";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -38,6 +39,7 @@ for (const resource of [
   "pos",
   "users",
   "businesses",
+  "money",
 ]) {
   app.use(`/api/${resource}`, requireSession);
   app.use(`/api/${resource}/*`, requireSession);
@@ -54,5 +56,6 @@ app.route("/api/admin-data", adminRoutes);
 app.route("/api/pos", posRoutes);
 app.route("/api/users", userRoutes);
 app.route("/api/businesses", businessRoutes);
+app.route("/api/money", moneyRoutes);
 
 export default app;

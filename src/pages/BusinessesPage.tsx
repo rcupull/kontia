@@ -24,18 +24,23 @@ export function BusinessesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>([]);
   const canEdit = user?.role === "owner";
 
   useEffect(() => {
-    void api
-      .currentBusiness()
-      .then(({ business: current }) => {
+    void Promise.all([api.currentBusiness(), api.moneySettings()])
+      .then(([{ business: current }, money]) => {
         setBusiness(current);
         setForm({
           name: current.name,
           currency: current.currency,
           salesTaxPercentage: current.salesTaxPercentage,
         });
+        setEnabledCurrencies(
+          money.currencies
+            .filter((row) => row.isActive)
+            .map((row) => row.currencyCode),
+        );
       })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
@@ -49,6 +54,7 @@ export function BusinessesPage() {
     setError("");
     try {
       await api.updateCurrentBusiness(form);
+      await api.configureCurrencies(enabledCurrencies);
       const { business: current } = await api.currentBusiness();
       setBusiness(current);
       setSaved(true);
@@ -121,6 +127,40 @@ export function BusinessesPage() {
                 }
               />
             </label>
+            <fieldset className="rounded-2xl border border-slate-200 p-4">
+              <legend className="px-2 text-sm font-black text-slate-700">
+                Monedas aceptadas
+              </legend>
+              <p className="mb-3 text-xs text-slate-400">
+                La moneda base siempre permanece activa.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {currencies.map(([code, currencyLabel]) => {
+                  const checked =
+                    code === form.currency || enabledCurrencies.includes(code);
+                  return (
+                    <label
+                      key={code}
+                      className="flex items-center gap-2 rounded-xl bg-slate-50 p-3 text-sm font-bold"
+                    >
+                      <input
+                        type="checkbox"
+                        disabled={!canEdit || code === form.currency}
+                        checked={checked}
+                        onChange={(event) =>
+                          setEnabledCurrencies((current) =>
+                            event.target.checked
+                              ? [...new Set([...current, code])]
+                              : current.filter((value) => value !== code),
+                          )
+                        }
+                      />
+                      {currencyLabel}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
             <label className="block text-sm font-black text-slate-700">
               Moneda
               <select

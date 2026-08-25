@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { AdminRepository } from "../repositories/adminRepository";
 import type { Bindings, Variables } from "../types";
+import { monetaryComponentSchema, moneyError } from "./money";
 
 export const adminRoutes = new Hono<{
   Bindings: Bindings;
@@ -21,10 +22,11 @@ const financial = z.object({
   ]),
   expenseType: z.string().optional(),
   moneyLocation: z.enum(["cashDeposit", "bankAccount"]),
-  amountCents: z.number().int(),
+  amountCents: z.number().int().positive(),
   description: z.string().trim().min(1).max(200),
   movementDate: z.string().datetime({ offset: true }),
   notes: z.string().trim().max(500).optional(),
+  components: z.array(monetaryComponentSchema).min(1).max(12).optional(),
 });
 adminRoutes.get("/sales", async (c) =>
   c.json({
@@ -52,29 +54,41 @@ adminRoutes.get("/financial", async (c) =>
 );
 adminRoutes.post("/financial", zValidator("json", financial), async (c) => {
   const u = c.get("sessionUser");
-  return c.json(
-    {
-      id: await new AdminRepository(c.env.DB).saveFinancial(
-        u.businessId,
-        u.id,
-        null,
-        c.req.valid("json"),
-      ),
-    },
-    201,
-  );
+  try {
+    return c.json(
+      {
+        id: await new AdminRepository(c.env.DB).saveFinancial(
+          u.businessId,
+          u.id,
+          null,
+          c.req.valid("json"),
+        ),
+      },
+      201,
+    );
+  } catch (error) {
+    const message = moneyError(error);
+    if (message) return c.json({ error: message }, 409);
+    throw error;
+  }
 });
 adminRoutes.put("/financial/:id", zValidator("json", financial), async (c) => {
-  const u = c.get("sessionUser"),
-    id = await new AdminRepository(c.env.DB).saveFinancial(
+  const u = c.get("sessionUser");
+  try {
+    const id = await new AdminRepository(c.env.DB).saveFinancial(
       u.businessId,
       u.id,
       c.req.param("id"),
       c.req.valid("json"),
     );
-  return id
-    ? c.json({ ok: true })
-    : c.json({ error: "El movimiento automático no se puede editar" }, 409);
+    return id
+      ? c.json({ ok: true })
+      : c.json({ error: "El movimiento automático no se puede editar" }, 409);
+  } catch (error) {
+    const message = moneyError(error);
+    if (message) return c.json({ error: message }, 409);
+    throw error;
+  }
 });
 adminRoutes.get("/dashboard", async (c) =>
   c.json(

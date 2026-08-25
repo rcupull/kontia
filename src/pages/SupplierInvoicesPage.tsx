@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
-import { Eye, FileText, Pencil, Plus, Search, X } from "lucide-react";
+import { Banknote, Eye, FileText, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
 import {
   FieldDateTimePicker,
@@ -13,10 +13,17 @@ import type {
   InvoiceReconciliationMovement,
   Supplier,
   SupplierInvoice,
+  MoneySettings,
 } from "../types";
+import {
+  MonetaryComponentsEditor,
+  draftToComponent,
+  newPaymentDraft,
+  type PaymentDraft,
+} from "../components/MonetaryComponentsEditor";
 
-const money = (cents: number) =>
-  new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
+const formatMoney = (cents: number, currency: string) =>
+  new Intl.NumberFormat("es", { style: "currency", currency }).format(
     cents / 100,
   );
 
@@ -40,6 +47,13 @@ export function SupplierInvoicesPage() {
   } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [moneySettings, setMoneySettings] = useState<MoneySettings | null>(
+    null,
+  );
+  const [paying, setPaying] = useState<SupplierInvoice | null>(null);
+  const [paymentDrafts, setPaymentDrafts] = useState<PaymentDraft[]>([]);
+  const money = (cents: number) =>
+    formatMoney(cents, moneySettings?.baseCurrency ?? "CUP");
   const methods = useForm<{
     supplierId: string;
     invoiceNumber: string;
@@ -56,9 +70,14 @@ export function SupplierInvoicesPage() {
     },
   });
   async function load() {
-    const [i, s] = await Promise.all([api.supplierInvoices(), api.suppliers()]);
+    const [i, s, moneyConfig] = await Promise.all([
+      api.supplierInvoices(),
+      api.suppliers(),
+      api.moneySettings(),
+    ]);
     setInvoices(i.invoices);
     setSuppliers(s.suppliers);
+    setMoneySettings(moneyConfig);
   }
   useEffect(() => {
     void load().finally(() => setLoading(false));
@@ -135,6 +154,33 @@ export function SupplierInvoicesPage() {
         reason instanceof Error
           ? reason.message
           : "No se pudo guardar la factura",
+      );
+    }
+  }
+  function openPayment(invoice: SupplierInvoice) {
+    if (!moneySettings) return;
+    setPaying(invoice);
+    setError("");
+    setPaymentDrafts([newPaymentDraft(moneySettings.baseCurrency)]);
+  }
+  async function submitPayment(event: React.FormEvent) {
+    event.preventDefault();
+    if (!paying || !moneySettings) return;
+    try {
+      const components = paymentDrafts
+        .map((row) => draftToComponent(row, moneySettings))
+        .filter((row): row is NonNullable<typeof row> => Boolean(row));
+      await api.addSupplierInvoicePayment(paying.id, {
+        paymentDate: new Date().toISOString(),
+        components,
+      });
+      setPaying(null);
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "No se pudo registrar el pago",
       );
     }
   }
@@ -220,9 +266,22 @@ export function SupplierInvoicesPage() {
                           </button>
                         </div>
                       )}
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        Pagado: {money(invoice.paidAmountCents)} · Pendiente:{" "}
+                        {money(invoice.pendingAmountCents)}
+                      </p>
                     </td>
                     <td>{invoice.batchCount}</td>
                     <td className="px-5 text-right">
+                      {invoice.pendingAmountCents > 0 && (
+                        <button
+                          onClick={() => openPayment(invoice)}
+                          className="mr-2 rounded-xl border border-emerald-200 p-2 text-emerald-700 hover:bg-emerald-50"
+                          aria-label={`Pagar factura ${invoice.invoiceNumber}`}
+                        >
+                          <Banknote size={16} />
+                        </button>
+                      )}
                       <button
                         onClick={() => showForm(invoice)}
                         className="rounded-xl border border-slate-200 p-2 hover:bg-slate-50"
@@ -337,6 +396,40 @@ export function SupplierInvoicesPage() {
               </div>
             </form>
           </FormProvider>
+        </div>
+      )}
+      {paying && moneySettings && (
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/45 p-4">
+          <form
+            onSubmit={submitPayment}
+            className="mx-auto my-10 max-w-3xl rounded-3xl bg-white p-7"
+          >
+            <div className="flex justify-between">
+              <div>
+                <h2 className="text-2xl font-black">
+                  Pagar factura {paying.invoiceNumber}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Pendiente: {money(paying.pendingAmountCents)}
+                </p>
+              </div>
+              <button type="button" onClick={() => setPaying(null)}>
+                <X />
+              </button>
+            </div>
+            <div className="mt-6">
+              <MonetaryComponentsEditor
+                settings={moneySettings}
+                drafts={paymentDrafts}
+                onChange={setPaymentDrafts}
+                totalBaseCents={paying.pendingAmountCents}
+              />
+            </div>
+            {error && <p className="mt-4 font-bold text-red-600">{error}</p>}
+            <button className="mt-6 w-full rounded-xl bg-emerald-700 p-3 font-black text-white">
+              Registrar pago
+            </button>
+          </form>
         </div>
       )}
       {details && (

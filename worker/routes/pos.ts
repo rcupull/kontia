@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { PosRepository } from "../repositories/posRepository";
 import type { Bindings, Variables } from "../types";
+import { monetaryComponentSchema, moneyError } from "./money";
 export const posRoutes = new Hono<{
   Bindings: Bindings;
   Variables: Variables;
@@ -25,6 +26,16 @@ posRoutes.post(
     z.object({
       locationId: z.string().uuid(),
       openingAmountCents: z.number().int().nonnegative(),
+      openingBalances: z
+        .array(
+          z.object({
+            currencyCode: z.string().regex(/^[A-Z]{3}$/),
+            amountMinor: z.number().int().nonnegative(),
+          }),
+        )
+        .min(1)
+        .max(12)
+        .optional(),
     }),
   ),
   async (c) => {
@@ -40,6 +51,7 @@ posRoutes.post(
             values.openingAmountCents,
             u.role !== "seller",
             u.role !== "seller",
+            values.openingBalances,
           ),
         },
         201,
@@ -66,6 +78,7 @@ posRoutes.post(
       createdAt: z.string().datetime({ offset: true }),
       expectedTotalCents: z.number().int().nonnegative(),
       notes: z.string().trim().max(500).optional(),
+      payments: z.array(monetaryComponentSchema).min(1).max(12).optional(),
       items: z
         .array(
           z.object({
@@ -102,6 +115,8 @@ posRoutes.post(
           "Indica una nota para justificar el precio diferenciado",
         OFFLINE_PERIOD_EXPIRED: "La venta excede el período offline permitido",
       };
+      const moneyMessage = moneyError(e);
+      if (moneyMessage) return c.json({ error: moneyMessage }, 409);
       if (e instanceof Error && messages[e.message])
         return c.json({ error: messages[e.message] }, 409);
       throw e;
@@ -170,6 +185,16 @@ posRoutes.post(
     z.object({
       sessionId: z.string().uuid(),
       countedCashAmountCents: z.number().int().nonnegative(),
+      countedBalances: z
+        .array(
+          z.object({
+            currencyCode: z.string().regex(/^[A-Z]{3}$/),
+            amountMinor: z.number().int().nonnegative(),
+          }),
+        )
+        .min(1)
+        .max(12)
+        .optional(),
     }),
   ),
   async (c) => {
@@ -181,6 +206,7 @@ posRoutes.post(
           u.id,
           c.req.valid("json").sessionId,
           c.req.valid("json").countedCashAmountCents,
+          c.req.valid("json").countedBalances,
         ),
       );
     } catch (e) {

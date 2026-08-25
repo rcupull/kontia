@@ -1,3 +1,8 @@
+import {
+  MoneyRepository,
+  type MonetaryComponentInput,
+} from "./moneyRepository";
+
 export class AdminRepository {
   constructor(private readonly db: D1Database) {}
 
@@ -7,26 +12,29 @@ export class AdminRepository {
       .prepare(
         `
       SELECT s.id,s.payment_method AS paymentMethod,s.total_cents AS totalCents,
-        s.created_at AS createdAt,u.display_name AS sellerName,l.name AS locationName,l.type AS locationType,
+        s.created_at AS createdAt,u.display_name AS sellerName,l.name AS locationName,
         r.id AS refundId,r.notes AS refundNotes,
-        (SELECT json_extract(a.metadata,'$.notes') FROM audit_logs a
-          WHERE a.business_id=s.business_id AND a.entity_type='sale' AND a.entity_id=s.id
-            AND a.action='priceOverride' AND a.deleted_at IS NULL ORDER BY a.created_at DESC LIMIT 1) AS notes,
+        COALESCE((SELECT json_group_array(json_object('id',m.id,'moneyAccountId',m.money_account_id,
+          'paymentMethod',m.payment_method,'currencyCode',m.currency_code,'amountMinor',m.amount_minor,
+          'exchangeRateScaled',m.exchange_rate_scaled,'baseAmountCents',m.base_amount_cents,'accountName',a.name))
+          FROM monetary_components m JOIN money_accounts a ON a.id=m.money_account_id
+          WHERE m.operation_type='sale' AND m.operation_id=s.id),'[]') AS payments,
         COALESCE((SELECT json_group_array(json_object('id',x.id,'productName',x.product_name,'quantity',x.quantity,'unitPriceCents',x.unit_price_cents,'totalCents',x.total_cents)) FROM
           (SELECT si.* FROM sale_items si WHERE si.sale_id=s.id AND si.deleted_at IS NULL ORDER BY si.created_at,si.id) x),'[]') AS items
       FROM sales s JOIN users u ON u.id=s.seller_id
       LEFT JOIN locations l ON l.id=s.location_id
       LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL
       WHERE s.business_id=? AND s.deleted_at IS NULL AND
-        (?='%%' OR u.display_name LIKE ? COLLATE NOCASE OR l.name LIKE ? COLLATE NOCASE OR CAST(s.total_cents AS TEXT) LIKE ? OR EXISTS
+        (?='%%' OR u.display_name LIKE ? COLLATE NOCASE OR CAST(s.total_cents AS TEXT) LIKE ? OR EXISTS
           (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND si.product_name LIKE ? COLLATE NOCASE))
       ORDER BY s.created_at DESC,s.id DESC LIMIT 500`,
       )
-      .bind(businessId, term, term, term, term, term)
+      .bind(businessId, term, term, term, term)
       .all<Record<string, unknown>>();
     return result.results.map((row) => ({
       ...row,
       items: JSON.parse(String(row.items ?? "[]")),
+      payments: JSON.parse(String(row.payments ?? "[]")),
     }));
   }
 
@@ -38,11 +46,15 @@ export class AdminRepository {
       SELECT cs.id,cs.status,cs.opened_at AS openedAt,cs.closed_at AS closedAt,
         cs.opening_amount_cents AS openingAmountCents,cs.expected_cash_amount_cents AS expectedCashAmountCents,
         cs.counted_cash_amount_cents AS countedCashAmountCents,cs.difference_cents AS differenceCents,
-        u.display_name AS sellerName,l.name AS locationName,l.type AS locationType,
+        COALESCE((SELECT json_group_array(json_object('currencyCode',cb.currency_code,
+          'openingAmountMinor',cb.opening_amount_minor,'expectedAmountMinor',cb.expected_amount_minor,
+          'countedAmountMinor',cb.counted_amount_minor,'differenceAmountMinor',cb.difference_amount_minor))
+          FROM cash_session_currency_balances cb WHERE cb.cash_session_id=cs.id),'[]') AS balances,
+        u.display_name AS sellerName,l.name AS locationName,
         COUNT(DISTINCT s.id) AS totalOrders,
         COALESCE(SUM(CASE WHEN r.id IS NULL THEN s.total_cents ELSE 0 END),0) AS netSalesCents,
-        COALESCE(SUM(CASE WHEN r.id IS NULL AND s.payment_method='cash' THEN s.total_cents ELSE 0 END),0) AS cashSalesCents,
-        COALESCE(SUM(CASE WHEN r.id IS NULL AND s.payment_method='card' THEN s.total_cents ELSE 0 END),0) AS cardSalesCents,
+        COALESCE(SUM(CASE WHEN r.id IS NULL THEN (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash') ELSE 0 END),0) AS cashSalesCents,
+        COALESCE(SUM(CASE WHEN r.id IS NULL THEN (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash') ELSE 0 END),0) AS cardSalesCents,
         COALESCE(SUM(CASE WHEN r.id IS NOT NULL THEN s.total_cents ELSE 0 END),0) AS refundsCents
       FROM cash_sessions cs JOIN users u ON u.id=cs.seller_id
       LEFT JOIN locations l ON l.id=cs.location_id
@@ -53,7 +65,12 @@ export class AdminRepository {
       )
       .bind(businessId, term, term)
       .all();
-    return result.results;
+    return result.results.map((row) => ({
+      ...row,
+      balances: JSON.parse(
+        String((row as Record<string, unknown>).balances ?? "[]"),
+      ),
+    }));
   }
 
   async financial(businessId: string, search = "") {
@@ -61,11 +78,29 @@ export class AdminRepository {
     return (
       await this.db
         .prepare(
-          `SELECT id,type,expense_type AS expenseType,money_location AS moneyLocation,amount_cents AS amountCents,description,movement_date AS movementDate,notes,related_entity_type AS relatedEntityType,related_entity_id AS relatedEntityId,created_at AS createdAt FROM financial_movements WHERE business_id=? AND deleted_at IS NULL AND (?='%%' OR description LIKE ? COLLATE NOCASE OR notes LIKE ? COLLATE NOCASE OR type LIKE ? COLLATE NOCASE OR money_location LIKE ? COLLATE NOCASE) ORDER BY movement_date DESC,id DESC LIMIT 500`,
+          `SELECT fm.id,fm.type,fm.expense_type AS expenseType,fm.money_location AS moneyLocation,
+           fm.amount_cents AS amountCents,fm.description,fm.movement_date AS movementDate,fm.notes,
+           fm.related_entity_type AS relatedEntityType,fm.related_entity_id AS relatedEntityId,
+           fm.created_at AS createdAt,
+           COALESCE((SELECT json_group_array(json_object('id',m.id,'moneyAccountId',m.money_account_id,
+             'paymentMethod',m.payment_method,'flow',m.flow,'currencyCode',m.currency_code,
+             'amountMinor',m.amount_minor,'exchangeRateScaled',m.exchange_rate_scaled,
+             'baseAmountCents',m.base_amount_cents,'accountName',a.name))
+             FROM monetary_components m JOIN money_accounts a ON a.id=m.money_account_id
+             WHERE m.operation_type='financialMovement' AND m.operation_id=fm.id),'[]') components
+           FROM financial_movements fm WHERE fm.business_id=? AND fm.deleted_at IS NULL AND
+           (?='%%' OR fm.description LIKE ? COLLATE NOCASE OR fm.notes LIKE ? COLLATE NOCASE
+             OR fm.type LIKE ? COLLATE NOCASE OR fm.money_location LIKE ? COLLATE NOCASE)
+           ORDER BY fm.movement_date DESC,fm.id DESC LIMIT 500`,
         )
         .bind(businessId, term, term, term, term, term)
         .all()
-    ).results;
+    ).results.map((row) => ({
+      ...row,
+      components: JSON.parse(
+        String((row as Record<string, unknown>).components ?? "[]"),
+      ),
+    }));
   }
 
   async saveFinancial(
@@ -74,6 +109,35 @@ export class AdminRepository {
     id: string | null,
     input: Record<string, unknown>,
   ) {
+    const money = new MoneyRepository(this.db);
+    let components = input.components as MonetaryComponentInput[] | undefined;
+    if (!components?.length) {
+      const settings = await money.settings(businessId);
+      const accountType =
+        input.moneyLocation === "cashDeposit" ? "cashDrawer" : "bankAccount";
+      const account = settings.accounts.find(
+        (row) =>
+          row.currencyCode === settings.baseCurrency &&
+          row.accountType === accountType,
+      );
+      if (!account) throw new Error("MONEY_ACCOUNT_NOT_FOUND");
+      components = [
+        {
+          moneyAccountId: String(account.id),
+          paymentMethod:
+            input.moneyLocation === "cashDeposit" ? "cash" : "transfer",
+          currencyCode: settings.baseCurrency,
+          amountMinor: Math.abs(Number(input.amountCents)),
+          exchangeRateScaled: 1000000,
+          baseAmountCents: Math.abs(Number(input.amountCents)),
+        },
+      ];
+    }
+    await money.validateComponents(
+      businessId,
+      components,
+      Math.abs(Number(input.amountCents)),
+    );
     const values = [
       input.type,
       input.expenseType || null,
@@ -84,21 +148,60 @@ export class AdminRepository {
       input.notes || null,
     ];
     if (id) {
-      const result = await this.db
+      const editable = await this.db
         .prepare(
-          `UPDATE financial_movements SET type=?,expense_type=?,money_location=?,amount_cents=?,description=?,movement_date=?,notes=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND deleted_at IS NULL AND related_entity_type IS NULL AND related_entity_id IS NULL`,
+          `SELECT id FROM financial_movements WHERE id=? AND business_id=? AND deleted_at IS NULL
+         AND related_entity_type IS NULL AND related_entity_id IS NULL`,
         )
-        .bind(...values, id, businessId)
-        .run();
-      return Number(result.meta.changes) > 0 ? id : null;
+        .bind(id, businessId)
+        .first();
+      if (!editable) return null;
+      await this.db.batch([
+        this.db
+          .prepare(
+            `UPDATE financial_movements SET type=?,expense_type=?,money_location=?,amount_cents=?,description=?,movement_date=?,notes=?,updated_at=datetime('now') WHERE id=? AND business_id=? AND deleted_at IS NULL AND related_entity_type IS NULL AND related_entity_id IS NULL`,
+          )
+          .bind(...values, id, businessId),
+        this.db
+          .prepare(
+            `DELETE FROM monetary_components WHERE business_id=? AND operation_type='financialMovement' AND operation_id=?`,
+          )
+          .bind(businessId, id),
+        ...money.componentStatements(
+          businessId,
+          userId,
+          "financialMovement",
+          id,
+          ["capitalInjection", "positiveAdjustment"].includes(
+            String(input.type),
+          )
+            ? "inflow"
+            : "outflow",
+          components,
+          String(input.movementDate),
+        ),
+      ]);
+      return id;
     }
     const nextId = crypto.randomUUID();
-    await this.db
-      .prepare(
-        `INSERT INTO financial_movements (id,business_id,type,expense_type,money_location,amount_cents,description,movement_date,notes,created_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .bind(nextId, businessId, ...values, userId)
-      .run();
+    await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO financial_movements (id,business_id,type,expense_type,money_location,amount_cents,description,movement_date,notes,created_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        )
+        .bind(nextId, businessId, ...values, userId),
+      ...money.componentStatements(
+        businessId,
+        userId,
+        "financialMovement",
+        nextId,
+        ["capitalInjection", "positiveAdjustment"].includes(String(input.type))
+          ? "inflow"
+          : "outflow",
+        components,
+        String(input.movementDate),
+      ),
+    ]);
     return nextId;
   }
 
@@ -131,24 +234,32 @@ export class AdminRepository {
         .first<{ tax: number }>(),
       bindRange(
         this.db.prepare(`
-            SELECT date(s.created_at) AS day,p.id AS productId,p.name AS productName,s.payment_method AS paymentMethod,
+            SELECT date(s.created_at) AS day,p.id AS productId,p.name AS productName,
               COUNT(DISTINCT s.id) AS orders,SUM(si.quantity) AS units,SUM(si.total_cents) AS grossCents,
-              SUM(si.quantity*b.unit_cost_cents) AS costCents
+              SUM(si.quantity*b.unit_cost_cents) AS costCents,
+              CASE WHEN s.total_cents>0 THEN ROUND(SUM(si.total_cents)*
+                (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc
+                 WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash')/s.total_cents)
+                ELSE 0 END AS cashCents
             FROM sales s JOIN sale_items si ON si.sale_id=s.id AND si.deleted_at IS NULL
             JOIN products p ON p.id=si.product_id LEFT JOIN inventory_batches b ON b.id=si.batch_id
             WHERE s.business_id=? AND s.deleted_at IS NULL AND ${range("s.created_at")}
-            GROUP BY day,p.id,s.payment_method`),
+            GROUP BY day,s.id,p.id`),
       ).all<Record<string, unknown>>(),
       bindRange(
         this.db.prepare(`
-            SELECT date(r.created_at) AS day,p.id AS productId,p.name AS productName,s.payment_method AS paymentMethod,
+            SELECT date(r.created_at) AS day,p.id AS productId,p.name AS productName,
               COUNT(DISTINCT r.id) AS refunds,SUM(si.quantity) AS units,SUM(si.total_cents) AS refundCents,
-              SUM(si.quantity*b.unit_cost_cents) AS costCents
+              SUM(si.quantity*b.unit_cost_cents) AS costCents,
+              CASE WHEN s.total_cents>0 THEN ROUND(SUM(si.total_cents)*
+                (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc
+                 WHERE mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method='cash')/s.total_cents)
+                ELSE 0 END AS cashCents
             FROM sale_refunds r JOIN sales s ON s.id=r.sale_id AND s.deleted_at IS NULL
             JOIN sale_items si ON si.sale_id=s.id AND si.deleted_at IS NULL JOIN products p ON p.id=si.product_id
             LEFT JOIN inventory_batches b ON b.id=si.batch_id
             WHERE r.business_id=? AND r.deleted_at IS NULL AND ${range("r.created_at")}
-            GROUP BY day,p.id,s.payment_method`),
+            GROUP BY day,r.id,p.id`),
       ).all<Record<string, unknown>>(),
       bindRange(
         this.db.prepare(`
@@ -174,9 +285,10 @@ export class AdminRepository {
       this.db
         .prepare(
           `
-            SELECT money_location AS moneyLocation,
-              SUM(CASE WHEN type IN ('capitalInjection','sessionClose','positiveAdjustment') THEN amount_cents ELSE -amount_cents END) AS balanceCents
-            FROM financial_movements WHERE business_id=? AND deleted_at IS NULL GROUP BY money_location`,
+            SELECT CASE WHEN a.account_type='cashDrawer' THEN 'cashDeposit' ELSE 'bankAccount' END AS moneyLocation,
+              SUM(CASE WHEN m.flow='inflow' THEN m.base_amount_cents ELSE -m.base_amount_cents END) AS balanceCents
+            FROM monetary_components m JOIN money_accounts a ON a.id=m.money_account_id
+            WHERE m.business_id=? AND a.deleted_at IS NULL GROUP BY moneyLocation`,
         )
         .bind(businessId)
         .all<Record<string, unknown>>(),
@@ -248,7 +360,8 @@ export class AdminRepository {
         String(row.productName),
       );
       const gross = Number(row.grossCents ?? 0),
-        cost = Number(row.costCents ?? 0);
+        cost = Number(row.costCents ?? 0),
+        cashGross = Number(row.cashCents ?? 0);
       for (const value of values) {
         value.grossSales += gross;
         value.netSales += gross;
@@ -256,13 +369,10 @@ export class AdminRepository {
         value.profit += gross - gross * taxRate - cost;
         value.orders += Number(row.orders ?? 0);
         value.units += Number(row.units ?? 0);
-        if (row.paymentMethod === "cash") {
-          value.grossCashSales += gross;
-          value.netCashSales += gross;
-        } else {
-          value.grossTransferSales += gross;
-          value.netTransferSales += gross;
-        }
+        value.grossCashSales += cashGross;
+        value.netCashSales += cashGross;
+        value.grossTransferSales += gross - cashGross;
+        value.netTransferSales += gross - cashGross;
       }
     }
     for (const row of refundRows.results) {
@@ -272,19 +382,17 @@ export class AdminRepository {
         String(row.productName),
       );
       const refund = Number(row.refundCents ?? 0),
-        cost = Number(row.costCents ?? 0);
+        cost = Number(row.costCents ?? 0),
+        cashRefund = Number(row.cashCents ?? 0);
       for (const value of values) {
         value.refunds += refund;
         value.netSales -= refund;
         value.cost -= cost;
         value.profit -= refund - refund * taxRate - cost;
-        if (row.paymentMethod === "cash") {
-          value.cashRefunds += refund;
-          value.netCashSales -= refund;
-        } else {
-          value.transferRefunds += refund;
-          value.netTransferSales -= refund;
-        }
+        value.cashRefunds += cashRefund;
+        value.netCashSales -= cashRefund;
+        value.transferRefunds += refund - cashRefund;
+        value.netTransferSales -= refund - cashRefund;
       }
     }
     for (const row of wasteRows.results) {

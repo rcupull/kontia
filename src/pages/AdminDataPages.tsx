@@ -20,6 +20,13 @@ import {
 } from "../components/fields";
 import type { CashSession, FinancialMovement, Sale } from "../types";
 import { PageSpinner } from "../components/Spinner";
+import {
+  MonetaryComponentsEditor,
+  draftToComponent,
+  newPaymentDraft,
+  type PaymentDraft,
+} from "../components/MonetaryComponentsEditor";
+import type { MoneySettings } from "../types";
 
 const money = (cents: number) =>
   new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
@@ -212,7 +219,7 @@ export function SalesPage() {
         placeholder="Buscar por producto, vendedor o total"
       />
       <div className="mt-4 overflow-x-auto rounded-3xl bg-white shadow-sm">
-        <table className="w-full min-w-[1000px] text-left">
+        <table className="w-full min-w-[850px] text-left">
           <thead className="text-xs uppercase text-slate-400">
             <tr>
               <th className="px-5 py-4">Fecha</th>
@@ -221,7 +228,6 @@ export function SalesPage() {
               <th>Total</th>
               <th>Productos</th>
               <th>Vendedor</th>
-              <th>Ubicación</th>
               <th />
             </tr>
           </thead>
@@ -244,18 +250,6 @@ export function SalesPage() {
                 </td>
                 <td>{s.items.length}</td>
                 <td>{s.sellerName}</td>
-                <td>
-                  <p className="font-bold">
-                    {s.locationName ?? "Sin ubicación"}
-                  </p>
-                  {s.locationType && (
-                    <span className="text-xs font-bold text-slate-400">
-                      {s.locationType === "warehouse"
-                        ? "Almacén"
-                        : "Punto de venta"}
-                    </span>
-                  )}
-                </td>
                 <td className="pr-5 text-right">
                   <button
                     onClick={() => setSelected(s)}
@@ -280,12 +274,6 @@ export function SalesPage() {
                 <p className="text-sm text-slate-500">
                   {date(selected.createdAt)} · {selected.sellerName}
                 </p>
-                <p className="mt-1 text-sm font-bold text-emerald-700">
-                  {selected.locationName ?? "Sin ubicación"}
-                  {selected.locationType
-                    ? ` · ${selected.locationType === "warehouse" ? "Almacén" : "Punto de venta"}`
-                    : ""}
-                </p>
               </div>
               <button onClick={() => setSelected(null)}>
                 <X />
@@ -294,11 +282,6 @@ export function SalesPage() {
             {selected.refundId && (
               <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">
                 Venta anulada. {selected.refundNotes}
-              </p>
-            )}
-            {selected.notes && (
-              <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900">
-                Precio diferenciado: {selected.notes}
               </p>
             )}
             <div className="mt-5 overflow-x-auto">
@@ -326,6 +309,22 @@ export function SalesPage() {
             <p className="mt-5 text-right text-xl font-black">
               Total: {money(selected.totalCents)}
             </p>
+            {!!selected.payments?.length && (
+              <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+                <p className="font-black">Importes y monedas</p>
+                {selected.payments.map((row) => (
+                  <p key={row.id} className="mt-2 flex justify-between text-sm">
+                    <span>
+                      {row.paymentMethod} · {row.currencyCode}
+                    </span>
+                    <b>
+                      {(row.amountMinor / 100).toLocaleString("es")}{" "}
+                      {row.currencyCode} = {money(row.baseAmountCents)}
+                    </b>
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -362,12 +361,11 @@ export function CashSessionsPage() {
         placeholder="Buscar por vendedor"
       />
       <div className="mt-4 overflow-x-auto rounded-3xl bg-white shadow-sm">
-        <table className="w-full min-w-[1200px] text-left">
+        <table className="w-full min-w-[1050px] text-left">
           <thead className="text-xs uppercase text-slate-400">
             <tr>
               <th className="px-5 py-4">Estado</th>
               <th>Vendedor</th>
-              <th>Ubicación</th>
               <th>Apertura</th>
               <th>Cierre</th>
               <th>Ventas</th>
@@ -386,18 +384,6 @@ export function CashSessionsPage() {
                   </span>
                 </td>
                 <td className="font-bold">{s.sellerName}</td>
-                <td>
-                  <p className="font-bold">
-                    {s.locationName ?? "Sin ubicación"}
-                  </p>
-                  {s.locationType && (
-                    <span className="text-xs font-bold text-slate-400">
-                      {s.locationType === "warehouse"
-                        ? "Almacén"
-                        : "Punto de venta"}
-                    </span>
-                  )}
-                </td>
                 <td>{date(s.openedAt)}</td>
                 <td>{date(s.closedAt)}</td>
                 <td>
@@ -431,6 +417,19 @@ export function CashSessionsPage() {
                       ? "Pendiente"
                       : money(s.differenceCents)}
                   </b>
+                  {s.balances?.map((row) => (
+                    <p
+                      key={row.currencyCode}
+                      className="mt-2 border-t pt-2 text-xs"
+                    >
+                      <b>{row.currencyCode}</b>: esperado{" "}
+                      {(row.expectedAmountMinor / 100).toLocaleString("es")} ·
+                      contado{" "}
+                      {row.countedAmountMinor == null
+                        ? "Pendiente"
+                        : (row.countedAmountMinor / 100).toLocaleString("es")}
+                    </p>
+                  ))}
                 </td>
               </tr>
             ))}
@@ -459,10 +458,15 @@ export function FinancialMovementsPage() {
     ),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
+  const [moneySettings, setMoneySettings] = useState<MoneySettings | null>(
+    null,
+  );
+  const [paymentDrafts, setPaymentDrafts] = useState<PaymentDraft[]>([]);
   const methods = useForm<FinancialValues>();
   const load = () =>
     api.financialMovements(search).then((r) => setItems(r.movements));
   useEffect(() => {
+    void api.moneySettings().then(setMoneySettings);
     const timer = setTimeout(
       () => void load().finally(() => setLoading(false)),
       200,
@@ -481,9 +485,26 @@ export function FinancialMovementsPage() {
       movementDate: item?.movementDate ?? new Date().toISOString(),
       notes: item?.notes ?? "",
     });
+    if (moneySettings)
+      setPaymentDrafts(
+        item?.components?.length
+          ? item.components.map((row) => ({
+              id: row.id,
+              currencyCode: row.currencyCode,
+              amount: row.amountMinor / 100,
+              rate: row.exchangeRateScaled / 1e6,
+              paymentMethod: row.paymentMethod,
+            }))
+          : [newPaymentDraft(moneySettings.baseCurrency)],
+      );
   }
   async function submit(v: FinancialValues) {
     try {
+      if (!moneySettings)
+        throw new Error("No se cargó la configuración monetaria");
+      const components = paymentDrafts
+        .map((row) => draftToComponent(row, moneySettings))
+        .filter((row): row is NonNullable<typeof row> => Boolean(row));
       await api.saveFinancialMovement(editing?.id ?? null, {
         type: v.type,
         expenseType:
@@ -495,6 +516,7 @@ export function FinancialMovementsPage() {
         description: v.description,
         movementDate: v.movementDate,
         notes: v.notes || undefined,
+        components,
       });
       setEditing(undefined);
       await load();
@@ -643,6 +665,16 @@ export function FinancialMovementsPage() {
                   })}
                   error={methods.formState.errors.amount}
                 />
+                {moneySettings && (
+                  <MonetaryComponentsEditor
+                    settings={moneySettings}
+                    drafts={paymentDrafts}
+                    onChange={setPaymentDrafts}
+                    totalBaseCents={Math.round(
+                      Number(methods.watch("amount") || 0) * 100,
+                    )}
+                  />
+                )}
                 <FieldInput
                   label="Descripción"
                   register={methods.register("description", {

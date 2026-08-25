@@ -13,6 +13,8 @@ import type {
   SupplierInvoice,
   BusinessUser,
   Business,
+  MoneySettings,
+  MonetaryComponentInput,
 } from "./types";
 
 export type DashboardMetrics = {
@@ -90,6 +92,42 @@ export const api = {
   }) =>
     request<{ ok: boolean }>("/api/businesses/current", {
       method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  moneySettings: () => request<MoneySettings>("/api/money/settings"),
+  configureCurrencies: (currencyCodes: string[]) =>
+    request<{ ok: boolean }>("/api/money/currencies", {
+      method: "PUT",
+      body: JSON.stringify({ currencyCodes }),
+    }),
+  currencyExchanges: () =>
+    request<{
+      exchanges: Array<{
+        id: string;
+        exchangeRateScaled: number;
+        exchangeDate: string;
+        notes?: string;
+        reversedAt?: string;
+        components: Array<{
+          id: string;
+          flow: "inflow" | "outflow";
+          currencyCode: string;
+          amountMinor: number;
+          baseAmountCents: number;
+          moneyAccountId: string;
+          accountName: string;
+        }>;
+      }>;
+    }>("/api/money/exchanges"),
+  createCurrencyExchange: (input: {
+    exchangeDate: string;
+    notes?: string;
+    cashSessionId?: string;
+    source: MonetaryComponentInput;
+    target: MonetaryComponentInput;
+  }) =>
+    request<{ id: string }>("/api/money/exchanges", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   setupStatus: () => request<{ required: boolean }>("/api/auth/setup/status"),
@@ -250,6 +288,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  addSupplierInvoicePayment: (
+    id: string,
+    input: { paymentDate: string; components: MonetaryComponentInput[] },
+  ) =>
+    request<{ pendingAmountCents: number }>(
+      `/api/supplier-invoices/${id}/payments`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
   inventoryBatches: (search = "") =>
     request<{ batches: InventoryBatch[] }>(
       `/api/inventory/batches?search=${encodeURIComponent(search)}`,
@@ -334,6 +380,7 @@ export const api = {
       description: string;
       movementDate: string;
       notes?: string;
+      components?: MonetaryComponentInput[];
     },
   ) =>
     request(
@@ -416,7 +463,11 @@ export const api = {
         cardSalesCents: number;
         cashRefundsCents: number;
         cardRefundsCents: number;
+        balances: import("./types").CurrencyBalance[];
       } | null;
+      baseCurrency: string;
+      currencies: Array<{ currencyCode: string; isActive: number }>;
+      accounts: import("./types").MoneyAccount[];
       products: Array<{
         id: string;
         name: string;
@@ -431,7 +482,11 @@ export const api = {
     }>(
       `/api/pos/state?${new URLSearchParams({ ...(selectNone ? { sessionId: "none" } : sessionId ? { sessionId } : {}) })}`,
     ),
-  openPosSession: (locationId: string, openingAmountCents: number) =>
+  openPosSession: (
+    locationId: string,
+    openingAmountCents: number,
+    openingBalances?: Array<{ currencyCode: string; amountMinor: number }>,
+  ) =>
     request<{
       session: {
         id: string;
@@ -444,7 +499,7 @@ export const api = {
       };
     }>("/api/pos/sessions", {
       method: "POST",
-      body: JSON.stringify({ locationId, openingAmountCents }),
+      body: JSON.stringify({ locationId, openingAmountCents, openingBalances }),
     }),
   createPosSale: (input: {
     cashSessionId: string;
@@ -453,6 +508,7 @@ export const api = {
     expectedTotalCents: number;
     paymentMethod: "cash" | "card";
     notes?: string;
+    payments?: MonetaryComponentInput[];
     items: Array<{
       productId: string;
       quantity: number;
@@ -486,12 +542,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sessionId, notes }),
     }),
-  closePosSession: (sessionId: string, countedCashAmountCents: number) =>
+  closePosSession: (
+    sessionId: string,
+    countedCashAmountCents: number,
+    countedBalances?: Array<{ currencyCode: string; amountMinor: number }>,
+  ) =>
     request<{ expectedCashAmountCents: number; differenceCents: number }>(
       "/api/pos/sessions/close",
       {
         method: "POST",
-        body: JSON.stringify({ sessionId, countedCashAmountCents }),
+        body: JSON.stringify({
+          sessionId,
+          countedCashAmountCents,
+          countedBalances,
+        }),
       },
     ),
   locations: (search = "") =>

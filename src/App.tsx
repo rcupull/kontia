@@ -14,6 +14,7 @@ import { PosPage } from "./pages/PosPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { UsersPage } from "./pages/UsersPage";
 import { BusinessesPage } from "./pages/BusinessesPage";
+import { MoneyPage } from "./pages/MoneyPage";
 import {
   CashSessionsPage,
   FinancialMovementsPage,
@@ -55,6 +56,7 @@ export default function App() {
           path="financial-movements"
           element={<FinancialMovementsPage />}
         />
+        <Route path="money" element={<MoneyPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="businesses" element={<BusinessesPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />

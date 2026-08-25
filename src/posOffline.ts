@@ -1,4 +1,5 @@
 import type { api } from "./api";
+import type { MonetaryComponentInput } from "./types";
 
 export type PosState = Awaited<ReturnType<typeof api.posState>>;
 export type PendingSale = {
@@ -7,6 +8,7 @@ export type PendingSale = {
   expectedTotalCents: number;
   paymentMethod: "cash" | "card";
   notes?: string;
+  payments?: MonetaryComponentInput[];
   items: Array<{
     productId: string;
     quantity: number;

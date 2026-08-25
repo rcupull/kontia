@@ -29,6 +29,12 @@ import { AppVersion } from "../components/AppVersion";
 import { UserMenuHeader } from "../components/UserMenuHeader";
 import { offlineLimitMs, posOffline, type PendingSale } from "../posOffline";
 import { playSaleSound, prepareSaleSound } from "../utils/audio";
+import {
+  MonetaryComponentsEditor,
+  draftToComponent,
+  newPaymentDraft,
+  type PaymentDraft,
+} from "../components/MonetaryComponentsEditor";
 type State = Awaited<ReturnType<typeof api.posState>>;
 type Product = State["products"][number];
 type Order = Awaited<ReturnType<typeof api.posOrders>>["orders"][number];
@@ -54,8 +60,6 @@ export function PosPage() {
     [cart, setCart] = useState<Record<string, number>>({}),
     [priceOverrides, setPriceOverrides] = useState<Record<string, number>>({}),
     [saleNotes, setSaleNotes] = useState(""),
-    [payment, setPayment] = useState<"cash" | "card">("cash"),
-    [cashReceived, setCashReceived] = useState(""),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
     [closing, setClosing] = useState(false),
@@ -73,6 +77,13 @@ export function PosPage() {
   const [selectedSessionId, setSelectedSessionId] = useState(
     () => window.localStorage.getItem(selectedSessionStorageKey) ?? "",
   );
+  const [paymentDrafts, setPaymentDrafts] = useState<PaymentDraft[]>([]);
+  const [openingSecondary, setOpeningSecondary] = useState<
+    Record<string, number>
+  >({});
+  const [countedSecondary, setCountedSecondary] = useState<
+    Record<string, number>
+  >({});
   const syncingRef = useRef(false);
   const openForm = useForm<{ locationId: string; amount: number }>({
       defaultValues: { locationId: "", amount: 0 },
@@ -147,6 +158,7 @@ export function PosPage() {
           expectedTotalCents: sale.expectedTotalCents,
           paymentMethod: sale.paymentMethod,
           notes: sale.notes,
+          payments: sale.payments,
           items: sale.items,
         });
         await posOffline.removeSale(sale.operationId);
@@ -249,8 +261,7 @@ export function PosPage() {
       Boolean(line.product),
     );
   const isWarehouse = data?.session?.locationType === "warehouse";
-  const standardPrice = (product: Product) =>
-    payment === "cash" ? product.cashPriceCents : product.cardPriceCents;
+  const standardPrice = (product: Product) => product.cashPriceCents;
   const appliedPrice = (product: Product) =>
     isWarehouse && priceOverrides[product.id] !== undefined
       ? priceOverrides[product.id]
@@ -262,9 +273,21 @@ export function PosPage() {
     (sum, line) => sum + Math.round(appliedPrice(line.product) * line.quantity),
     0,
   );
-  const cashReceivedCents = Math.round(Number(cashReceived || 0) * 100);
-  const cashIsEnough = cashReceived !== "" && cashReceivedCents >= total;
-  const changeDueCents = Math.max(0, cashReceivedCents - total);
+  useEffect(() => {
+    if (!data) return;
+    setPaymentDrafts((current) => {
+      if (current.length > 1) return current;
+      const row = current[0] ?? newPaymentDraft(data.baseCurrency);
+      return [
+        {
+          ...row,
+          currencyCode: data.baseCurrency,
+          rate: 1,
+          amount: total / 100,
+        },
+      ];
+    });
+  }, [data?.baseCurrency, total]);
   const activePendingSales = pendingSales.filter(
     (sale) => sale.cashSessionId === data?.session?.id,
   );
@@ -287,7 +310,6 @@ export function PosPage() {
     setCart({});
     setPriceOverrides({});
     setSaleNotes("");
-    setCashReceived("");
     setOrdersOpen(false);
     setSelectedSessionId(sessionId);
     if (sessionId)
@@ -321,7 +343,6 @@ export function PosPage() {
     setCart({});
     setPriceOverrides({});
     setSaleNotes("");
-    setCashReceived("");
     setMobileView("products");
   }
   async function saveOfflineSale(
@@ -361,6 +382,19 @@ export function PosPage() {
               (saleInput.paymentMethod === "cash"
                 ? saleInput.expectedTotalCents
                 : 0),
+            balances: data!.session.balances.map((balance) => {
+              const cashAmount = (saleInput.payments ?? [])
+                .filter(
+                  (row) =>
+                    row.paymentMethod === "cash" &&
+                    row.currencyCode === balance.currencyCode,
+                )
+                .reduce((sum, row) => sum + row.amountMinor, 0);
+              return {
+                ...balance,
+                expectedAmountMinor: balance.expectedAmountMinor + cashAmount,
+              };
+            }),
           }
         : null,
       products: data!.products.map((product) => ({
@@ -377,7 +411,6 @@ export function PosPage() {
     setCart({});
     setPriceOverrides({});
     setSaleNotes("");
-    setCashReceived("");
     setMobileView("products");
     await soundReady;
     playSaleSound();
@@ -389,6 +422,17 @@ export function PosPage() {
       const result = await api.openPosSession(
         values.locationId,
         Math.round(values.amount * 100),
+        data!.currencies
+          .filter((row) => row.isActive)
+          .map((row) => ({
+            currencyCode: row.currencyCode,
+            amountMinor:
+              row.currencyCode === data!.baseCurrency
+                ? Math.round(values.amount * 100)
+                : Math.round(
+                    Number(openingSecondary[row.currencyCode] || 0) * 100,
+                  ),
+          })),
       );
       openForm.reset({ locationId: "", amount: 0 });
       await load(result.session.id);
@@ -407,14 +451,32 @@ export function PosPage() {
         throw new Error(
           "Indica una nota para justificar el precio diferenciado",
         );
+      const settings = {
+        baseCurrency: data!.baseCurrency,
+        currencies: data!.currencies,
+        accounts: data!.accounts,
+      };
+      const payments = paymentDrafts
+        .map((row) => draftToComponent(row, settings))
+        .filter((row): row is NonNullable<typeof row> => Boolean(row));
+      if (payments.reduce((sum, row) => sum + row.baseAmountCents, 0) !== total)
+        throw new Error(
+          "Los componentes monetarios deben cubrir exactamente el total",
+        );
+      const legacyPaymentMethod = payments.some(
+        (row) => row.paymentMethod === "cash",
+      )
+        ? ("cash" as const)
+        : ("card" as const);
       const operationId = crypto.randomUUID();
       const saleInput = {
         cashSessionId: data!.session!.id,
         operationId,
         createdAt: new Date().toISOString(),
         expectedTotalCents: total,
-        paymentMethod: payment,
+        paymentMethod: legacyPaymentMethod,
         notes: saleNotes.trim() || undefined,
+        payments,
         items: lines.map((l) => ({
           productId: l.product.id,
           quantity: l.quantity,
@@ -439,7 +501,7 @@ export function PosPage() {
       setCart({});
       setPriceOverrides({});
       setSaleNotes("");
-      setCashReceived("");
+      setPaymentDrafts([newPaymentDraft(data!.baseCurrency)]);
       setMobileView("products");
       await soundReady;
       playSaleSound();
@@ -456,9 +518,17 @@ export function PosPage() {
   async function close(values: { amount: number }) {
     setError("");
     try {
+      const countedBalances = data!.session!.balances.map((row) => ({
+        currencyCode: row.currencyCode,
+        amountMinor:
+          row.currencyCode === data!.baseCurrency
+            ? Math.round(values.amount * 100)
+            : Math.round(Number(countedSecondary[row.currencyCode] || 0) * 100),
+      }));
       const result = await api.closePosSession(
         data!.session!.id,
         Math.round(values.amount * 100),
+        countedBalances,
       );
       setClosing(false);
       setCart({});
@@ -800,6 +870,32 @@ export function PosPage() {
                     error={openForm.formState.errors.amount}
                   />
                 </div>
+                {data.currencies
+                  .filter(
+                    (row) =>
+                      row.isActive && row.currencyCode !== data.baseCurrency,
+                  )
+                  .map((row) => (
+                    <label
+                      key={row.currencyCode}
+                      className="mt-4 block text-sm font-black text-slate-700"
+                    >
+                      Monto inicial {row.currencyCode}
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={openingSecondary[row.currencyCode] ?? 0}
+                        onChange={(e) =>
+                          setOpeningSecondary((current) => ({
+                            ...current,
+                            [row.currencyCode]: Number(e.target.value),
+                          }))
+                        }
+                        className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3"
+                      />
+                    </label>
+                  ))}
                 {error && (
                   <p className="mt-3 text-sm font-bold text-red-600">{error}</p>
                 )}
@@ -893,11 +989,7 @@ export function PosPage() {
                       {product.stock} disponibles
                     </p>
                     <p className="mt-2 text-sm font-black text-emerald-700 sm:mt-3 sm:text-base">
-                      {money(
-                        payment === "cash"
-                          ? product.cashPriceCents
-                          : product.cardPriceCents,
-                      )}
+                      {money(product.cashPriceCents)}
                     </p>
                   </div>
                 </button>
@@ -1033,23 +1125,6 @@ export function PosPage() {
               )}
             </div>
             <div className="mt-6 border-t pt-5">
-              <p className="text-sm font-black text-slate-500">
-                Método de pago
-              </p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setPayment("cash")}
-                  className={`rounded-xl p-3 font-black ${payment === "cash" ? "bg-emerald-700 text-white" : "bg-slate-100"}`}
-                >
-                  Efectivo
-                </button>
-                <button
-                  onClick={() => setPayment("card")}
-                  className={`rounded-xl p-3 font-black ${payment === "card" ? "bg-emerald-700 text-white" : "bg-slate-100"}`}
-                >
-                  Tarjeta
-                </button>
-              </div>
               {isWarehouse && (
                 <label className="mt-4 block text-sm font-black text-slate-500">
                   Nota de la venta
@@ -1070,44 +1145,18 @@ export function PosPage() {
                 <span>Total</span>
                 <span>{money(total)}</span>
               </div>
-              {payment === "cash" && (
-                <div className="mt-4 rounded-2xl bg-slate-100 p-4">
-                  <label
-                    htmlFor="cash-received"
-                    className="text-sm font-black text-slate-600"
-                  >
-                    Efectivo recibido
-                  </label>
-                  <div className="mt-2 flex items-center rounded-xl border border-slate-200 bg-white px-3 focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/15">
-                    <span className="font-black text-slate-400">$</span>
-                    <input
-                      id="cash-received"
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.01"
-                      value={cashReceived}
-                      onChange={(event) => setCashReceived(event.target.value)}
-                      placeholder="0.00"
-                      className="min-w-0 flex-1 bg-transparent px-2 py-3 text-right text-xl font-black outline-none"
-                    />
-                  </div>
-                  {cashReceived !== "" && (
-                    <div
-                      className={`mt-3 flex items-center justify-between font-black ${cashIsEnough ? "text-emerald-700" : "text-red-600"}`}
-                    >
-                      <span>{cashIsEnough ? "Vuelto" : "Faltan"}</span>
-                      <span className="text-2xl">
-                        {money(
-                          cashIsEnough
-                            ? changeDueCents
-                            : Math.max(0, total - cashReceivedCents),
-                        )}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
+              <div className="mt-4">
+                <MonetaryComponentsEditor
+                  settings={{
+                    baseCurrency: data.baseCurrency,
+                    currencies: data.currencies,
+                    accounts: data.accounts,
+                  }}
+                  drafts={paymentDrafts}
+                  onChange={setPaymentDrafts}
+                  totalBaseCents={total}
+                />
+              </div>
               <button
                 disabled={
                   !lines.length ||
@@ -1257,6 +1306,37 @@ export function PosPage() {
                   })}
                   error={closeForm.formState.errors.amount}
                 />
+                {data.session?.balances
+                  .filter((row) => row.currencyCode !== data.baseCurrency)
+                  .map((row) => (
+                    <label
+                      key={row.currencyCode}
+                      className="mt-4 block text-sm font-black text-slate-700"
+                    >
+                      Efectivo contado {row.currencyCode}
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={
+                          countedSecondary[row.currencyCode] ??
+                          row.expectedAmountMinor / 100
+                        }
+                        onChange={(e) =>
+                          setCountedSecondary((current) => ({
+                            ...current,
+                            [row.currencyCode]: Number(e.target.value),
+                          }))
+                        }
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                      />
+                      <span className="mt-1 block text-xs text-slate-500">
+                        Esperado:{" "}
+                        {(row.expectedAmountMinor / 100).toLocaleString("es")}{" "}
+                        {row.currencyCode}
+                      </span>
+                    </label>
+                  ))}
                 {data.session && (
                   <div
                     className={`mt-4 rounded-2xl px-4 py-3 font-black ${countedCashCents - data.session.expectedCashAmountCents === 0 ? "bg-emerald-100 text-emerald-700" : countedCashCents - data.session.expectedCashAmountCents < 0 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}

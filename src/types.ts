@@ -14,6 +14,49 @@ export type Business = {
   updatedAt: string;
 };
 
+export type MoneyAccount = {
+  id: string;
+  name: string;
+  accountType: "cashDrawer" | "bankAccount" | "reserve";
+  currencyCode: string;
+  locationId?: string;
+  isActive: number;
+  movementBalanceMinor?: number;
+};
+export type MoneySettings = {
+  baseCurrency: string;
+  currencies: Array<{ currencyCode: string; isActive: number }>;
+  accounts: MoneyAccount[];
+  cashReconciliation?: Array<{
+    currencyCode: string;
+    operationType: string;
+    inflowMinor: number;
+    outflowMinor: number;
+    inflowBaseCents: number;
+    outflowBaseCents: number;
+  }>;
+};
+export type MonetaryComponentInput = {
+  moneyAccountId: string;
+  paymentMethod: "cash" | "card" | "transfer";
+  currencyCode: string;
+  amountMinor: number;
+  exchangeRateScaled: number;
+  baseAmountCents: number;
+};
+export type MonetaryComponent = MonetaryComponentInput & {
+  id: string;
+  flow?: "inflow" | "outflow";
+  accountName?: string;
+};
+export type CurrencyBalance = {
+  currencyCode: string;
+  openingAmountMinor: number;
+  expectedAmountMinor: number;
+  countedAmountMinor?: number;
+  differenceAmountMinor?: number;
+};
+
 export type BusinessUser = {
   id: string;
   username: string;
@@ -65,6 +108,9 @@ export type SupplierInvoice = {
   batchCount: number;
   batchesTotalCents: number;
   hasInvalidCosts: number;
+  paidAmountCents: number;
+  pendingAmountCents: number;
+  payments: MonetaryComponent[];
 };
 
 export type InvoiceReconciliationMovement = {
@@ -146,11 +192,10 @@ export type Sale = {
   createdAt: string;
   sellerName: string;
   locationName?: string;
-  locationType?: "warehouse" | "point_of_sale";
-  notes?: string;
   refundId?: string;
   refundNotes?: string;
   items: SaleItem[];
+  payments?: MonetaryComponent[];
 };
 export type CashSession = {
   id: string;
@@ -163,12 +208,12 @@ export type CashSession = {
   differenceCents?: number;
   sellerName: string;
   locationName?: string;
-  locationType?: "warehouse" | "point_of_sale";
   totalOrders: number;
   netSalesCents: number;
   cashSalesCents: number;
   cardSalesCents: number;
   refundsCents: number;
+  balances?: CurrencyBalance[];
 };
 export type FinancialMovement = {
   id: string;
@@ -182,4 +227,5 @@ export type FinancialMovement = {
   relatedEntityType?: string;
   relatedEntityId?: string;
   createdAt: string;
+  components?: MonetaryComponent[];
 };

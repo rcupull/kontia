@@ -50,6 +50,17 @@ authRoutes.post(
         input.businessName,
       ),
       c.env.DB.prepare(
+        `INSERT INTO business_currencies (business_id,currency_code) VALUES (?,'CUP')`,
+      ).bind(businessId),
+      c.env.DB.prepare(
+        `INSERT INTO money_accounts (id,business_id,name,account_type,currency_code)
+         VALUES (?,?,'Efectivo CUP','cashDrawer','CUP')`,
+      ).bind(`default-cash-${businessId}-CUP`, businessId),
+      c.env.DB.prepare(
+        `INSERT INTO money_accounts (id,business_id,name,account_type,currency_code)
+         VALUES (?,?,'Cuenta bancaria CUP','bankAccount','CUP')`,
+      ).bind(`default-bank-${businessId}-CUP`, businessId),
+      c.env.DB.prepare(
         `INSERT INTO users
         (id, business_id, username, display_name, password_hash, password_salt, role)
         VALUES (?, ?, ?, ?, ?, ?, 'owner')`,

@@ -79,11 +79,14 @@ maintenanceRoutes.post("/reset-operations", async (c) => {
 
   const tables = [
     "audit_logs",
+    "monetary_components",
+    "currency_exchanges",
     "financial_movements",
     "inventory_movements",
     "sale_refunds",
     "sale_items",
     "sales",
+    "cash_session_currency_balances",
     "cash_sessions",
     "inventory_batch_stocks",
     "inventory_batches",
