@@ -96,6 +96,7 @@ adminRoutes.get("/dashboard", async (c) =>
       c.get("sessionUser").businessId,
       c.req.query("from"),
       c.req.query("to"),
+      Number(c.req.query("timezoneOffsetMinutes") ?? 0),
     ),
   ),
 );

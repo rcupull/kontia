@@ -205,7 +205,18 @@ export class AdminRepository {
     return nextId;
   }
 
-  async dashboard(businessId: string, from?: string, to?: string) {
+  async dashboard(
+    businessId: string,
+    from?: string,
+    to?: string,
+    timezoneOffsetMinutes = 0,
+  ) {
+    const normalizedOffset = Number.isFinite(timezoneOffsetMinutes)
+        ? timezoneOffsetMinutes
+        : 0,
+      safeOffset = Math.max(-840, Math.min(840, Math.trunc(normalizedOffset))),
+      localDay = (column: string) =>
+        `date(${column}, '${-safeOffset} minutes')`;
     const range = (column: string) =>
       `(? IS NULL OR datetime(${column}) >= datetime(?)) AND (? IS NULL OR datetime(${column}) <= datetime(?))`;
     const bindRange = (statement: D1PreparedStatement) =>
@@ -225,6 +236,8 @@ export class AdminRepository {
       financeRows,
       financeBalances,
       inventoryRows,
+      accountValueRows,
+      inventoryValueRows,
     ] = await Promise.all([
       this.db
         .prepare(
@@ -234,7 +247,7 @@ export class AdminRepository {
         .first<{ tax: number }>(),
       bindRange(
         this.db.prepare(`
-            SELECT date(s.created_at) AS day,p.id AS productId,p.name AS productName,
+            SELECT ${localDay("s.created_at")} AS day,p.id AS productId,p.name AS productName,
               COUNT(DISTINCT s.id) AS orders,SUM(si.quantity) AS units,SUM(si.total_cents) AS grossCents,
               SUM(si.quantity*b.unit_cost_cents) AS costCents,
               CASE WHEN s.total_cents>0 THEN ROUND(SUM(si.total_cents)*
@@ -248,7 +261,7 @@ export class AdminRepository {
       ).all<Record<string, unknown>>(),
       bindRange(
         this.db.prepare(`
-            SELECT date(r.created_at) AS day,p.id AS productId,p.name AS productName,
+            SELECT ${localDay("r.created_at")} AS day,p.id AS productId,p.name AS productName,
               COUNT(DISTINCT r.id) AS refunds,SUM(si.quantity) AS units,SUM(si.total_cents) AS refundCents,
               SUM(si.quantity*b.unit_cost_cents) AS costCents,
               CASE WHEN s.total_cents>0 THEN ROUND(SUM(si.total_cents)*
@@ -263,7 +276,7 @@ export class AdminRepository {
       ).all<Record<string, unknown>>(),
       bindRange(
         this.db.prepare(`
-            SELECT date(m.created_at) AS day,p.id AS productId,p.name AS productName,l.type AS locationType,
+            SELECT ${localDay("m.created_at")} AS day,p.id AS productId,p.name AS productName,l.type AS locationType,
               SUM(m.quantity) AS units,SUM(m.quantity*b.unit_cost_cents) AS lossCents
             FROM inventory_movements m JOIN inventory_batches b ON b.id=m.batch_id JOIN products p ON p.id=m.product_id
             LEFT JOIN locations l ON l.id=m.source_location_id
@@ -300,6 +313,31 @@ export class AdminRepository {
             FROM locations l LEFT JOIN inventory_batch_stocks bs ON bs.location_id=l.id
             LEFT JOIN inventory_batches b ON b.id=bs.batch_id AND b.deleted_at IS NULL
             WHERE l.business_id=? AND l.deleted_at IS NULL AND l.is_active=1 GROUP BY l.id ORDER BY l.type,l.name`,
+        )
+        .bind(businessId)
+        .all<Record<string, unknown>>(),
+      this.db
+        .prepare(
+          `SELECT ${localDay("created_at")} AS day,
+            SUM(CASE WHEN flow='inflow' THEN base_amount_cents ELSE -base_amount_cents END) AS changeCents
+           FROM monetary_components WHERE business_id=?
+           GROUP BY day ORDER BY day`,
+        )
+        .bind(businessId)
+        .all<Record<string, unknown>>(),
+      this.db
+        .prepare(
+          `SELECT ${localDay("m.created_at")} AS day,
+            SUM(CASE
+              WHEN m.source_location_id IS NULL AND m.destination_location_id IS NOT NULL
+                THEN m.quantity*b.unit_cost_cents
+              WHEN m.source_location_id IS NOT NULL AND m.destination_location_id IS NULL
+                THEN -m.quantity*b.unit_cost_cents
+              ELSE 0 END) AS changeCents
+           FROM inventory_movements m
+           JOIN inventory_batches b ON b.id=m.batch_id AND b.business_id=m.business_id
+           WHERE m.business_id=? AND m.deleted_at IS NULL
+           GROUP BY day ORDER BY day`,
         )
         .bind(businessId)
         .all<Record<string, unknown>>(),
@@ -492,6 +530,65 @@ export class AdminRepository {
       },
       { warehouseCents: 0, posCents: 0 },
     );
+    const accountChanges = new Map(
+        accountValueRows.results.map((row) => [
+          String(row.day),
+          Number(row.changeCents ?? 0),
+        ]),
+      ),
+      inventoryChanges = new Map(
+        inventoryValueRows.results.map((row) => [
+          String(row.day),
+          Number(row.changeCents ?? 0),
+        ]),
+      ),
+      wealthDays = [
+        ...new Set([...accountChanges.keys(), ...inventoryChanges.keys()]),
+      ]
+        .filter(Boolean)
+        .sort(),
+      requestedStart = from?.slice(0, 10),
+      requestedEnd = to?.slice(0, 10),
+      firstDay =
+        requestedStart ??
+        wealthDays[0] ??
+        new Date().toISOString().slice(0, 10),
+      lastDay = requestedEnd ?? new Date().toISOString().slice(0, 10),
+      wealthDaily: Array<{
+        day: string;
+        accountsCents: number;
+        inventoryCents: number;
+        totalCents: number;
+      }> = [];
+    let accountsCents = 0,
+      inventoryCents = 0;
+    for (const day of wealthDays) {
+      if (day >= firstDay) break;
+      accountsCents += accountChanges.get(day) ?? 0;
+      inventoryCents += inventoryChanges.get(day) ?? 0;
+    }
+    if (firstDay <= lastDay) {
+      const cursor = new Date(`${firstDay}T00:00:00Z`),
+        end = new Date(`${lastDay}T00:00:00Z`);
+      while (cursor <= end) {
+        const day = cursor.toISOString().slice(0, 10);
+        accountsCents += accountChanges.get(day) ?? 0;
+        inventoryCents += inventoryChanges.get(day) ?? 0;
+        wealthDaily.push({
+          day,
+          accountsCents,
+          inventoryCents,
+          totalCents: accountsCents + inventoryCents,
+        });
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+    }
+    const latestWealth = wealthDaily.at(-1) ?? {
+      day: lastDay,
+      accountsCents,
+      inventoryCents,
+      totalCents: accountsCents + inventoryCents,
+    };
     return {
       range: { from: from ?? null, to: to ?? null },
       totals,
@@ -517,6 +614,7 @@ export class AdminRepository {
         ...waste,
         totalWasteCents: waste.warehouseCents + waste.posCents,
       },
+      wealth: { latest: latestWealth, daily: wealthDaily },
     };
   }
 }

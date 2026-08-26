@@ -377,6 +377,84 @@ function FinancialFlowChart({
   );
 }
 
+function Wealth({ data }: { data: DashboardData }) {
+  const latest = data.wealth.latest,
+    chartData: ChartData = {
+      labels: data.wealth.daily.map((row) => row.day),
+      datasets: [
+        {
+          label: "Patrimonio total",
+          data: data.wealth.daily.map((row) => row.totalCents),
+          borderColor: "#7c3aed",
+          backgroundColor: "#7c3aed",
+          fill: false,
+          tension: 0.25,
+        },
+        {
+          label: "Dinero en cuentas",
+          data: data.wealth.daily.map((row) => row.accountsCents),
+          borderColor: "#2563eb",
+          backgroundColor: "#2563eb",
+          fill: false,
+          tension: 0.25,
+        },
+        {
+          label: "Inventario al costo",
+          data: data.wealth.daily.map((row) => row.inventoryCents),
+          borderColor: "#16a34a",
+          backgroundColor: "#16a34a",
+          fill: false,
+          tension: 0.25,
+        },
+      ],
+    };
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card
+          title="Patrimonio del negocio"
+          value={money(latest.totalCents)}
+          icon={<TrendingUp />}
+          tone="violet"
+        />
+        <Card
+          title="Dinero en todas las cuentas"
+          value={money(latest.accountsCents)}
+          icon={<WalletCards />}
+          tone="blue"
+        />
+        <Card
+          title="Inventario actual al costo"
+          value={money(latest.inventoryCents)}
+          icon={<Boxes />}
+        />
+      </div>
+      <Chart
+        type="line"
+        title="Evolución diaria del patrimonio"
+        data={chartData}
+        height={340}
+        options={{
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (context: any) =>
+                  `${context.dataset.label}: ${money(Number(context.raw))}`,
+              },
+            },
+          },
+          scales: { y: { beginAtZero: false } },
+        }}
+      />
+      <p className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-sm font-bold text-violet-800">
+        Patrimonio = saldos equivalentes en la moneda base de todas las cuentas
+        + inventario disponible valorado a costo.
+      </p>
+    </div>
+  );
+}
+
 function General({
   data,
   selected,
@@ -386,6 +464,7 @@ function General({
 }) {
   return (
     <div className="space-y-5">
+      <Wealth data={data} />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {metricOptions
           .filter((metric) => selected.includes(metric.key))

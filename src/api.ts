@@ -387,7 +387,11 @@ export const api = {
       id ? `/api/admin-data/financial/${id}` : "/api/admin-data/financial",
       { method: id ? "PUT" : "POST", body: JSON.stringify(input) },
     ),
-  dashboard: (from?: string, to?: string) =>
+  dashboard: (
+    from?: string,
+    to?: string,
+    timezoneOffsetMinutes = new Date().getTimezoneOffset(),
+  ) =>
     request<{
       range: { from: string | null; to: string | null };
       totals: DashboardMetrics;
@@ -426,8 +430,26 @@ export const api = {
         posCents: number;
         totalWasteCents: number;
       };
+      wealth: {
+        latest: {
+          day: string;
+          accountsCents: number;
+          inventoryCents: number;
+          totalCents: number;
+        };
+        daily: Array<{
+          day: string;
+          accountsCents: number;
+          inventoryCents: number;
+          totalCents: number;
+        }>;
+      };
     }>(
-      `/api/admin-data/dashboard?${new URLSearchParams({ ...(from && { from }), ...(to && { to }) })}`,
+      `/api/admin-data/dashboard?${new URLSearchParams({
+        ...(from && { from }),
+        ...(to && { to }),
+        timezoneOffsetMinutes: String(timezoneOffsetMinutes),
+      })}`,
     ),
   posState: (sessionId?: string, selectNone = false) =>
     request<{
