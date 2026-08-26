@@ -654,11 +654,23 @@ function Accounts({ settings }: { settings: MoneySettings }) {
         balanceMinor: inflowMinor - outflowMinor,
       };
     }),
-    totalBaseCents = reconciliation.reduce(
-      (sum, row) =>
-        sum + Number(row.inflowBaseCents) - Number(row.outflowBaseCents),
-      0,
-    );
+    transferCupBalance = settings.accounts
+      .filter(
+        (account) =>
+          account.accountType === "bankAccount" &&
+          account.currencyCode === "CUP" &&
+          account.isActive,
+      )
+      .reduce(
+        (sum, account) => sum + Number(account.movementBalanceMinor ?? 0),
+        0,
+      ),
+    totalBaseCents =
+      reconciliation.reduce(
+        (sum, row) =>
+          sum + Number(row.inflowBaseCents) - Number(row.outflowBaseCents),
+        0,
+      ) + (settings.baseCurrency === "CUP" ? transferCupBalance : 0);
   return (
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -679,6 +691,15 @@ function Accounts({ settings }: { settings: MoneySettings }) {
             </p>
           </div>
         ))}
+        <div className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-sm font-black uppercase text-blue-700">
+            <Landmark size={18} />
+            <span>Transferencias CUP</span>
+          </div>
+          <p className="mt-3 text-3xl font-black">
+            {(transferCupBalance / 100).toLocaleString("es")} CUP
+          </p>
+        </div>
         <Card
           title={`Total equivalente en ${settings.baseCurrency}`}
           value={money(totalBaseCents)}
