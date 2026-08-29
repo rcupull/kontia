@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../api";
+import { formatDatabaseDateTime } from "../dateTime";
 import {
   FieldDateTimePicker,
   FieldInput,
@@ -471,7 +472,7 @@ export function InventoryAdminPage() {
                 {visibleMovements.map((m) => (
                   <tr key={m.id} className="border-t border-slate-100">
                     <td className="px-5 py-4 text-sm">
-                      {new Date(m.createdAt).toLocaleString()}
+                      {formatDatabaseDateTime(m.createdAt)}
                     </td>
                     <td className="font-black">{m.productName}</td>
                     <td>

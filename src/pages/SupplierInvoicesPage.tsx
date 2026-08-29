@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
 import { Banknote, Eye, FileText, Pencil, Plus, Search, X } from "lucide-react";
 import { api } from "../api";
+import { formatDatabaseDateTime } from "../dateTime";
 import {
   FieldDateTimePicker,
   FieldInput,
@@ -500,7 +501,7 @@ export function SupplierInvoicesPage() {
                   {details.movements.map((movement) => (
                     <tr key={movement.id} className="border-t">
                       <td className="px-4 py-3">
-                        {new Date(movement.createdAt).toLocaleString("es")}
+                        {formatDatabaseDateTime(movement.createdAt)}
                       </td>
                       <td className="font-black">{movement.productName}</td>
                       <td>
