@@ -38,7 +38,11 @@ Este comando elimina los datos locales existentes; no modifica la base remota.
 npx wrangler d1 create kontia-db
 npx wrangler secret put SESSION_SECRET
 npx wrangler secret put BOOTSTRAP_SECRET
+npx wrangler secret put EXTERNAL_API_TOKEN
 ```
+
+`EXTERNAL_API_TOKEN` protege la consulta global de catálogo y las salidas de inventario solicitadas
+por aplicaciones externas autorizadas.
 
 Reemplaza el identificador provisional en `wrangler.jsonc`, aplica las migraciones remotas y despliega:
 

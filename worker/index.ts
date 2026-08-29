@@ -12,6 +12,7 @@ import { posRoutes } from "./routes/pos";
 import { userRoutes } from "./routes/users";
 import { businessRoutes } from "./routes/businesses";
 import { moneyRoutes } from "./routes/money";
+import { externalRoutes } from "./routes/external";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -25,6 +26,7 @@ app.onError((error, c) => {
 
 app.get("/api/health", (c) => c.json({ ok: true, version: __APP_VERSION__ }));
 app.route("/api/auth", authRoutes);
+app.route("/api/external", externalRoutes);
 app.get("/media/:key", getImage);
 for (const resource of [
   "products",

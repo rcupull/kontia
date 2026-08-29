@@ -5,6 +5,7 @@ export type MovementType =
   | "inventoryInjection"
   | "positiveAdjustment"
   | "internalConsumption"
+  | "externalSale"
   | "ownerWithdrawal"
   | "waste"
   | "negativeAdjustment"

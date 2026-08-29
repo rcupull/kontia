@@ -50,6 +50,11 @@ const movementOptions = [
     "Consumo interno",
     "Registra unidades usadas por el negocio.",
   ],
+  [
+    "externalSale",
+    "Venta por canal externo",
+    "Descuenta inventario vendido fuera de Kontia; indica la referencia en las notas.",
+  ],
   ["ownerWithdrawal", "Retiro del dueño", "Retira unidades del almacén."],
   ["waste", "Merma", "Descuenta pérdidas de una ubicación."],
   ["negativeAdjustment", "Ajuste negativo", "Resta unidades de una ubicación."],
@@ -215,6 +220,7 @@ export function InventoryAdminPage() {
   const needsSource = [
     "transfer",
     "internalConsumption",
+    "externalSale",
     "ownerWithdrawal",
     "waste",
     "negativeAdjustment",
@@ -713,9 +719,24 @@ export function InventoryAdminPage() {
                     </p>
                   )}
                 <FieldTextarea
-                  label="Notas"
+                  label={
+                    type === "externalSale"
+                      ? "Canal y referencia externa"
+                      : "Notas"
+                  }
                   rows={3}
-                  register={methods.register("notes")}
+                  placeholder={
+                    type === "externalSale"
+                      ? "Ejemplo: Hazte Chef · pedido HC-1234"
+                      : undefined
+                  }
+                  register={methods.register("notes", {
+                    required:
+                      type === "externalSale"
+                        ? "Indica el canal y la referencia del pedido"
+                        : false,
+                  })}
+                  error={methods.formState.errors.notes}
                 />
               </div>
               {error && (

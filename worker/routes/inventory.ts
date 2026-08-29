@@ -15,6 +15,7 @@ const movementTypes = [
   "inventoryInjection",
   "positiveAdjustment",
   "internalConsumption",
+  "externalSale",
   "ownerWithdrawal",
   "waste",
   "negativeAdjustment",
@@ -23,20 +24,30 @@ const movementTypes = [
   "disassembly",
   "disassemblyReturn",
 ] as const;
-const input = z.object({
-  productId: z.string().uuid(),
-  batchId: z.string().uuid().optional(),
-  sourceLocationId: z.string().uuid().optional(),
-  destinationLocationId: z.string().uuid().optional(),
-  movementType: z.enum(movementTypes),
-  quantity: z.number().positive(),
-  unitCostCents: z.number().int().positive().optional(),
-  cashPriceCents: z.number().int().positive().optional(),
-  cardPriceCents: z.number().int().positive().optional(),
-  supplierInvoiceId: z.string().uuid().optional(),
-  receivedAt: z.string().datetime({ offset: true }).optional(),
-  notes: z.string().trim().max(500).optional(),
-});
+const input = z
+  .object({
+    productId: z.string().uuid(),
+    batchId: z.string().uuid().optional(),
+    sourceLocationId: z.string().uuid().optional(),
+    destinationLocationId: z.string().uuid().optional(),
+    movementType: z.enum(movementTypes),
+    quantity: z.number().positive(),
+    unitCostCents: z.number().int().positive().optional(),
+    cashPriceCents: z.number().int().positive().optional(),
+    cardPriceCents: z.number().int().positive().optional(),
+    supplierInvoiceId: z.string().uuid().optional(),
+    receivedAt: z.string().datetime({ offset: true }).optional(),
+    notes: z.string().trim().max(500).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.movementType === "externalSale" && !value.notes?.trim()) {
+      context.addIssue({
+        code: "custom",
+        path: ["notes"],
+        message: "Indica el canal externo y la referencia del pedido",
+      });
+    }
+  });
 const batchInput = z.object({
   receivedAt: z.string().datetime({ offset: true }),
   unitCostCents: z.number().int().nonnegative(),

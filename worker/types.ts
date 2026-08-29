@@ -7,6 +7,7 @@ export type Bindings = {
   ASSETS: Fetcher;
   SESSION_SECRET: string;
   BOOTSTRAP_SECRET: string;
+  EXTERNAL_API_TOKEN: string;
 };
 
 export type SessionUser = {

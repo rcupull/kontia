@@ -1,2 +1,3 @@
 SESSION_SECRET=replace-with-a-long-random-secret
 BOOTSTRAP_SECRET=replace-with-a-one-time-setup-secret
+EXTERNAL_API_TOKEN=replace-with-a-shared-integration-token
