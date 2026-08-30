@@ -18,8 +18,11 @@ export class ExternalCatalogRepository {
     const result = await this.db
       .prepare(
         `SELECT p.id,p.business_id AS businessId,business.name AS businessName,
+          upper(business.currency) AS currencyCode,
           p.sku,p.name,p.description,p.type,
-          COALESCE(SUM(CASE WHEN b.deleted_at IS NULL AND l.is_active=1 AND l.deleted_at IS NULL THEN bs.quantity ELSE 0 END),0) AS availableQuantity
+          COALESCE(SUM(CASE WHEN b.deleted_at IS NULL AND l.is_active=1 AND l.deleted_at IS NULL THEN bs.quantity ELSE 0 END),0) AS availableQuantity,
+          MAX(CASE WHEN b.deleted_at IS NULL AND l.is_active=1 AND l.deleted_at IS NULL
+            AND bs.quantity>0 THEN b.unit_cost_cents ELSE NULL END) AS maximumAvailableUnitCostCents
          FROM products p
          JOIN businesses business ON business.id=p.business_id AND business.is_active=1
          LEFT JOIN inventory_batches b ON b.product_id=p.id AND b.business_id=p.business_id
@@ -44,7 +47,12 @@ export class ExternalCatalogRepository {
          WHERE p.id=? AND p.deleted_at IS NULL AND p.is_active=1`,
       )
       .bind(productId)
-      .first<{ id: string; businessId: string; sku: string | null; name: string }>();
+      .first<{
+        id: string;
+        businessId: string;
+        sku: string | null;
+        name: string;
+      }>();
     if (!product) return null;
 
     const result = await this.db
@@ -70,7 +78,11 @@ export class ExternalCatalogRepository {
         locationName: string;
         locationType: "warehouse" | "point_of_sale";
         availableQuantity: number;
-        batches: Array<{ batchId: string; receivedAt: string; quantity: number }>;
+        batches: Array<{
+          batchId: string;
+          receivedAt: string;
+          quantity: number;
+        }>;
       }
     >();
     for (const row of result.results) {
@@ -83,7 +95,11 @@ export class ExternalCatalogRepository {
       };
       const quantity = Number(row.quantity);
       location.availableQuantity += quantity;
-      location.batches.push({ batchId: row.batchId, receivedAt: row.receivedAt, quantity });
+      location.batches.push({
+        batchId: row.batchId,
+        receivedAt: row.receivedAt,
+        quantity,
+      });
       locations.set(row.locationId, location);
     }
     const locationList = [...locations.values()];
@@ -149,7 +165,10 @@ export class ExternalCatalogRepository {
       )
       .bind(product.id, product.businessId, location.id)
       .all<{ id: string; quantity: number }>();
-    const total = batches.results.reduce((sum, batch) => sum + Number(batch.quantity), 0);
+    const total = batches.results.reduce(
+      (sum, batch) => sum + Number(batch.quantity),
+      0,
+    );
     if (total < input.quantity) throw new Error("INSUFFICIENT_STOCK");
 
     const operationId = crypto.randomUUID();
@@ -265,7 +284,8 @@ export class ExternalCatalogRepository {
       )
       .bind(operation.id)
       .all<{ batchId: string; quantity: number }>();
-    if (!items.results.length) throw new Error("EXTERNAL_OPERATION_ITEMS_NOT_FOUND");
+    if (!items.results.length)
+      throw new Error("EXTERNAL_OPERATION_ITEMS_NOT_FOUND");
     const note = `Reversión de venta externa · ${input.reversalReference} · Salida original: ${operation.externalReference} · Origen: ${input.sourceSystem} · Ubicación: ${operation.locationName}`;
     const statements: D1PreparedStatement[] = [
       this.db
@@ -284,7 +304,12 @@ export class ExternalCatalogRepository {
              ON CONFLICT(batch_id,location_id) DO UPDATE SET
                quantity=quantity+excluded.quantity,updated_at=datetime('now')`,
           )
-          .bind(operation.businessId, item.batchId, operation.locationId, item.quantity),
+          .bind(
+            operation.businessId,
+            item.batchId,
+            operation.locationId,
+            item.quantity,
+          ),
         this.db
           .prepare(
             `INSERT INTO inventory_movements
@@ -315,7 +340,8 @@ export class ExternalCatalogRepository {
       await this.db.batch(statements);
     } catch (error) {
       const reversed = await this.findExternalOperation(input.operationKey);
-      if (reversed?.reversedAt) return { operation: reversed, alreadyReversed: true };
+      if (reversed?.reversedAt)
+        return { operation: reversed, alreadyReversed: true };
       throw error;
     }
     return {
