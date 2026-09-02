@@ -927,25 +927,29 @@ export function PosPage() {
               <div className="flex max-w-full gap-2 overflow-x-auto pb-1 xl:max-w-[58%]">
                 <button
                   type="button"
+                  aria-label="Todas las categorías"
+                  title="Todas las categorías"
                   onClick={() => setSelectedCategoryId("all")}
-                  className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-black ${selectedCategoryId === "all" ? "bg-emerald-700 text-white" : "bg-white text-slate-600 shadow-sm"}`}
+                  className={`flex shrink-0 items-center gap-0 rounded-xl px-3 py-2 text-sm font-black sm:gap-2 ${selectedCategoryId === "all" ? "bg-emerald-700 text-white" : "bg-white text-slate-600 shadow-sm"}`}
                 >
-                  <span className="text-xl">✨</span> Todas
+                  <span className="text-xl">✨</span>
+                  <span className="hidden sm:inline">Todas</span>
                 </button>
                 {availableCategories.map((category) => (
                   <button
                     type="button"
                     key={category.id}
+                    aria-label={category.name}
                     title={category.name}
                     onClick={() =>
                       setSelectedCategoryId((current) =>
                         current === category.id ? "all" : category.id,
                       )
                     }
-                    className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-black ${selectedCategoryId === category.id ? "bg-emerald-700 text-white" : "bg-white text-slate-600 shadow-sm"}`}
+                    className={`flex shrink-0 items-center gap-0 rounded-xl px-3 py-2 text-sm font-black sm:gap-2 ${selectedCategoryId === category.id ? "bg-emerald-700 text-white" : "bg-white text-slate-600 shadow-sm"}`}
                   >
                     <span className="text-2xl">{category.icon || "🛒"}</span>
-                    <span>{category.name}</span>
+                    <span className="hidden sm:inline">{category.name}</span>
                   </button>
                 ))}
               </div>
