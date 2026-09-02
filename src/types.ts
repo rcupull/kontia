@@ -106,6 +106,8 @@ export type SupplierInvoice = {
   totalAmountCents: number;
   notes?: string;
   batchCount: number;
+  purchasedQuantity: number;
+  remainingQuantity: number;
   batchesTotalCents: number;
   hasInvalidCosts: number;
   paidAmountCents: number;

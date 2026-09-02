@@ -28,6 +28,9 @@ const formatMoney = (cents: number, currency: string) =>
     cents / 100,
   );
 
+const formatQuantity = (quantity: number) =>
+  new Intl.NumberFormat("es", { maximumFractionDigits: 3 }).format(quantity);
+
 function generateInvoiceNumber() {
   const now = new Date();
   const day = String(now.getDate()).padStart(2, "0");
@@ -230,6 +233,7 @@ export function SupplierInvoicesPage() {
                 <th>Fecha</th>
                 <th>Total</th>
                 <th>Lotes</th>
+                <th className="min-w-48">Salida de inventario</th>
                 <th></th>
               </tr>
             </thead>
@@ -238,6 +242,19 @@ export function SupplierInvoicesPage() {
                 const difference =
                   invoice.totalAmountCents - invoice.batchesTotalCents;
                 const reconciled = !invoice.hasInvalidCosts && difference === 0;
+                const inventoryExitPercentage =
+                  invoice.purchasedQuantity > 0
+                    ? Math.min(
+                        100,
+                        Math.max(
+                          0,
+                          ((invoice.purchasedQuantity -
+                            invoice.remainingQuantity) /
+                            invoice.purchasedQuantity) *
+                            100,
+                        ),
+                      )
+                    : null;
                 return (
                   <tr
                     key={invoice.id}
@@ -273,6 +290,42 @@ export function SupplierInvoicesPage() {
                       </p>
                     </td>
                     <td>{invoice.batchCount}</td>
+                    <td className="py-3 pr-5">
+                      {inventoryExitPercentage === null ? (
+                        <span className="text-sm font-bold text-slate-400">
+                          Sin productos
+                        </span>
+                      ) : (
+                        <div
+                          title={`${formatQuantity(invoice.remainingQuantity)} unidades disponibles de ${formatQuantity(invoice.purchasedQuantity)} compradas`}
+                        >
+                          <div className="mb-1 flex items-center justify-between gap-3 text-xs font-bold">
+                            <span
+                              className={
+                                inventoryExitPercentage === 100
+                                  ? "text-emerald-700"
+                                  : "text-slate-600"
+                              }
+                            >
+                              {inventoryExitPercentage.toLocaleString("es", {
+                                maximumFractionDigits: 1,
+                              })}
+                              %
+                            </span>
+                            <span className="whitespace-nowrap text-slate-400">
+                              {formatQuantity(invoice.remainingQuantity)}{" "}
+                              restantes
+                            </span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className={`h-full rounded-full ${inventoryExitPercentage === 100 ? "bg-emerald-600" : "bg-amber-500"}`}
+                              style={{ width: `${inventoryExitPercentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-5 text-right">
                       {invoice.pendingAmountCents > 0 && (
                         <button

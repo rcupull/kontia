@@ -26,6 +26,13 @@ export class SupplierInvoiceRepository {
           FROM monetary_components mc JOIN money_accounts ma ON ma.id=mc.money_account_id
           WHERE mc.business_id=i.business_id AND mc.operation_type='supplierInvoice'
             AND mc.operation_id=i.id AND mc.flow='outflow'),'[]') AS payments,
+        COALESCE((SELECT SUM(ib.initial_quantity) FROM inventory_batches ib
+          WHERE ib.business_id=i.business_id AND ib.supplier_invoice_id=i.id
+            AND ib.deleted_at IS NULL),0) AS purchasedQuantity,
+        COALESCE((SELECT SUM(ibs.quantity) FROM inventory_batches ib
+          JOIN inventory_batch_stocks ibs ON ibs.batch_id=ib.id AND ibs.business_id=ib.business_id
+          WHERE ib.business_id=i.business_id AND ib.supplier_invoice_id=i.id
+            AND ib.deleted_at IS NULL),0) AS remainingQuantity,
         COUNT(DISTINCT b.id) AS batchCount,
         COALESCE(SUM(CASE
           WHEN m.movement_type='negativeAdjustment' THEN -(m.quantity*b.unit_cost_cents)
