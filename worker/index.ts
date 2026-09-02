@@ -20,7 +20,11 @@ import type { Bindings, Variables } from "./types";
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 app.onError((error, c) => {
-  console.error("Request failed", error);
+  console.error("Request failed", {
+    operation: `${c.req.method} ${new URL(c.req.url).pathname}`,
+    error: error.message,
+    cause: error.cause == null ? undefined : String(error.cause),
+  });
   return c.json({ error: "No pudimos completar la solicitud" }, 500);
 });
 

@@ -467,6 +467,8 @@ export function FinancialMovementsPage() {
     api.financialMovements(search).then((r) => setItems(r.movements));
   useEffect(() => {
     void api.moneySettings().then(setMoneySettings);
+  }, []);
+  useEffect(() => {
     const timer = setTimeout(
       () => void load().finally(() => setLoading(false)),
       200,

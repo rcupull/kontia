@@ -33,7 +33,7 @@ export class SupplierInvoiceRepository {
         COALESCE(MAX(CASE WHEN m.id IS NOT NULL AND b.unit_cost_cents<=0 THEN 1 ELSE 0 END),0) AS hasInvalidCosts
       FROM supplier_invoices i
       JOIN suppliers s ON s.id = i.supplier_id AND s.business_id = i.business_id
-      LEFT JOIN inventory_batches b ON b.supplier_invoice_id = i.id AND b.deleted_at IS NULL
+      LEFT JOIN inventory_batches b ON b.business_id=i.business_id AND b.supplier_invoice_id = i.id AND b.deleted_at IS NULL
       LEFT JOIN inventory_movements m ON m.batch_id=b.id AND m.business_id=i.business_id
         AND m.deleted_at IS NULL AND m.movement_type IN ('purchase','positiveAdjustment','negativeAdjustment')
       WHERE i.business_id = ? AND i.deleted_at IS NULL

@@ -26,9 +26,9 @@ externalRoutes.get("/products", async (c) => {
 });
 
 externalRoutes.get("/products/:id/availability", async (c) => {
-  const availability = await new ExternalCatalogRepository(c.env.DB).availability(
-    c.req.param("id"),
-  );
+  const availability = await new ExternalCatalogRepository(
+    c.env.DB,
+  ).availability(c.req.param("id"));
   if (!availability) return c.json({ error: "Producto no encontrado" }, 404);
   c.header("Cache-Control", "private, no-store");
   return c.json(availability);
@@ -48,7 +48,9 @@ externalRoutes.post(
   ),
   async (c) => {
     try {
-      const result = await new ExternalCatalogRepository(c.env.DB).createExternalSale({
+      const result = await new ExternalCatalogRepository(
+        c.env.DB,
+      ).createExternalSale({
         productId: c.req.param("id"),
         ...c.req.valid("json"),
       });
@@ -61,7 +63,10 @@ externalRoutes.post(
         return c.json({ error: "Ubicación no encontrada" }, 404);
       }
       if (error instanceof Error && error.message === "INSUFFICIENT_STOCK") {
-        return c.json({ error: "No hay existencia suficiente en esa ubicación" }, 409);
+        return c.json(
+          { error: "No hay existencia suficiente en esa ubicación" },
+          409,
+        );
       }
       throw error;
     }
@@ -86,7 +91,10 @@ externalRoutes.post(
         }),
       );
     } catch (error) {
-      if (error instanceof Error && error.message === "EXTERNAL_OPERATION_NOT_FOUND") {
+      if (
+        error instanceof Error &&
+        error.message === "EXTERNAL_OPERATION_NOT_FOUND"
+      ) {
         return c.json({ error: "Operación externa no encontrada" }, 404);
       }
       throw error;

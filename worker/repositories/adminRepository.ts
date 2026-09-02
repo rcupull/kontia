@@ -2,15 +2,17 @@ import {
   MoneyRepository,
   type MonetaryComponentInput,
 } from "./moneyRepository";
+import { logD1Batch, observeD1 } from "../db/observability";
 
 export class AdminRepository {
   constructor(private readonly db: D1Database) {}
 
   async sales(businessId: string, search = "") {
     const term = `%${search.trim()}%`;
-    const result = await this.db
-      .prepare(
-        `
+    const result = await observeD1("admin.sales.list", () =>
+      this.db
+        .prepare(
+          `
       SELECT s.id,s.payment_method AS paymentMethod,s.total_cents AS totalCents,
         s.created_at AS createdAt,u.display_name AS sellerName,l.name AS locationName,
         r.id AS refundId,r.notes AS refundNotes,
@@ -18,19 +20,20 @@ export class AdminRepository {
           'paymentMethod',m.payment_method,'currencyCode',m.currency_code,'amountMinor',m.amount_minor,
           'exchangeRateScaled',m.exchange_rate_scaled,'baseAmountCents',m.base_amount_cents,'accountName',a.name))
           FROM monetary_components m JOIN money_accounts a ON a.id=m.money_account_id
-          WHERE m.operation_type='sale' AND m.operation_id=s.id),'[]') AS payments,
+          WHERE m.business_id=s.business_id AND m.operation_type='sale' AND m.operation_id=s.id),'[]') AS payments,
         COALESCE((SELECT json_group_array(json_object('id',x.id,'productName',x.product_name,'quantity',x.quantity,'unitPriceCents',x.unit_price_cents,'totalCents',x.total_cents)) FROM
-          (SELECT si.* FROM sale_items si WHERE si.sale_id=s.id AND si.deleted_at IS NULL ORDER BY si.created_at,si.id) x),'[]') AS items
+          (SELECT si.* FROM sale_items si WHERE si.business_id=s.business_id AND si.sale_id=s.id AND si.deleted_at IS NULL ORDER BY si.created_at,si.id) x),'[]') AS items
       FROM sales s JOIN users u ON u.id=s.seller_id
       LEFT JOIN locations l ON l.id=s.location_id
-      LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL
+      LEFT JOIN sale_refunds r ON r.business_id=s.business_id AND r.sale_id=s.id AND r.deleted_at IS NULL
       WHERE s.business_id=? AND s.deleted_at IS NULL AND
         (?='%%' OR u.display_name LIKE ? COLLATE NOCASE OR CAST(s.total_cents AS TEXT) LIKE ? OR EXISTS
-          (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id AND si.product_name LIKE ? COLLATE NOCASE))
+          (SELECT 1 FROM sale_items si WHERE si.business_id=s.business_id AND si.sale_id=s.id AND si.product_name LIKE ? COLLATE NOCASE))
       ORDER BY s.created_at DESC,s.id DESC LIMIT 500`,
-      )
-      .bind(businessId, term, term, term, term)
-      .all<Record<string, unknown>>();
+        )
+        .bind(businessId, term, term, term, term)
+        .all<Record<string, unknown>>(),
+    );
     return result.results.map((row) => ({
       ...row,
       items: JSON.parse(String(row.items ?? "[]")),
@@ -40,9 +43,10 @@ export class AdminRepository {
 
   async sessions(businessId: string, search = "") {
     const term = `%${search.trim()}%`;
-    const result = await this.db
-      .prepare(
-        `
+    const result = await observeD1("admin.sessions.list", () =>
+      this.db
+        .prepare(
+          `
       SELECT cs.id,cs.status,cs.opened_at AS openedAt,cs.closed_at AS closedAt,
         cs.opening_amount_cents AS openingAmountCents,cs.expected_cash_amount_cents AS expectedCashAmountCents,
         cs.counted_cash_amount_cents AS countedCashAmountCents,cs.difference_cents AS differenceCents,
@@ -53,18 +57,19 @@ export class AdminRepository {
         u.display_name AS sellerName,l.name AS locationName,
         COUNT(DISTINCT s.id) AS totalOrders,
         COALESCE(SUM(CASE WHEN r.id IS NULL THEN s.total_cents ELSE 0 END),0) AS netSalesCents,
-        COALESCE(SUM(CASE WHEN r.id IS NULL THEN (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash') ELSE 0 END),0) AS cashSalesCents,
-        COALESCE(SUM(CASE WHEN r.id IS NULL THEN (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash') ELSE 0 END),0) AS cardSalesCents,
+        COALESCE(SUM(CASE WHEN r.id IS NULL THEN (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash') ELSE 0 END),0) AS cashSalesCents,
+        COALESCE(SUM(CASE WHEN r.id IS NULL THEN (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash') ELSE 0 END),0) AS cardSalesCents,
         COALESCE(SUM(CASE WHEN r.id IS NOT NULL THEN s.total_cents ELSE 0 END),0) AS refundsCents
       FROM cash_sessions cs JOIN users u ON u.id=cs.seller_id
       LEFT JOIN locations l ON l.id=cs.location_id
-      LEFT JOIN sales s ON s.cash_session_id=cs.id AND s.deleted_at IS NULL
-      LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL
+      LEFT JOIN sales s ON s.business_id=cs.business_id AND s.cash_session_id=cs.id AND s.deleted_at IS NULL
+      LEFT JOIN sale_refunds r ON r.business_id=s.business_id AND r.sale_id=s.id AND r.deleted_at IS NULL
       WHERE cs.business_id=? AND cs.deleted_at IS NULL AND (?='%%' OR u.display_name LIKE ? COLLATE NOCASE)
       GROUP BY cs.id ORDER BY cs.opened_at DESC,cs.id DESC LIMIT 500`,
-      )
-      .bind(businessId, term, term)
-      .all();
+        )
+        .bind(businessId, term, term)
+        .all(),
+    );
     return result.results.map((row) => ({
       ...row,
       balances: JSON.parse(
@@ -76,9 +81,10 @@ export class AdminRepository {
   async financial(businessId: string, search = "") {
     const term = `%${search.trim()}%`;
     return (
-      await this.db
-        .prepare(
-          `SELECT fm.id,fm.type,fm.expense_type AS expenseType,fm.money_location AS moneyLocation,
+      await observeD1("admin.financial.list", () =>
+        this.db
+          .prepare(
+            `SELECT fm.id,fm.type,fm.expense_type AS expenseType,fm.money_location AS moneyLocation,
            fm.amount_cents AS amountCents,fm.description,fm.movement_date AS movementDate,fm.notes,
            fm.related_entity_type AS relatedEntityType,fm.related_entity_id AS relatedEntityId,
            fm.created_at AS createdAt,
@@ -87,14 +93,15 @@ export class AdminRepository {
              'amountMinor',m.amount_minor,'exchangeRateScaled',m.exchange_rate_scaled,
              'baseAmountCents',m.base_amount_cents,'accountName',a.name))
              FROM monetary_components m JOIN money_accounts a ON a.id=m.money_account_id
-             WHERE m.operation_type='financialMovement' AND m.operation_id=fm.id),'[]') components
+             WHERE m.business_id=fm.business_id AND m.operation_type='financialMovement' AND m.operation_id=fm.id),'[]') components
            FROM financial_movements fm WHERE fm.business_id=? AND fm.deleted_at IS NULL AND
            (?='%%' OR fm.description LIKE ? COLLATE NOCASE OR fm.notes LIKE ? COLLATE NOCASE
              OR fm.type LIKE ? COLLATE NOCASE OR fm.money_location LIKE ? COLLATE NOCASE)
            ORDER BY fm.movement_date DESC,fm.id DESC LIMIT 500`,
-        )
-        .bind(businessId, term, term, term, term, term)
-        .all()
+          )
+          .bind(businessId, term, term, term, term, term)
+          .all(),
+      )
     ).results.map((row) => ({
       ...row,
       components: JSON.parse(
@@ -227,24 +234,13 @@ export class AdminRepository {
         to ?? null,
         to ?? null,
       );
-    const [
-      business,
-      saleRows,
-      refundRows,
-      wasteRows,
-      expenseRows,
-      financeRows,
-      financeBalances,
-      inventoryRows,
-      accountValueRows,
-      inventoryValueRows,
-    ] = await Promise.all([
+    const dashboardStartedAt = performance.now();
+    const dashboardResults = (await this.db.batch([
       this.db
         .prepare(
           `SELECT sales_tax_percentage AS tax FROM businesses WHERE id=?`,
         )
-        .bind(businessId)
-        .first<{ tax: number }>(),
+        .bind(businessId),
       bindRange(
         this.db.prepare(`
             SELECT ${localDay("s.created_at")} AS day,p.id AS productId,p.name AS productName,
@@ -252,13 +248,13 @@ export class AdminRepository {
               SUM(si.quantity*b.unit_cost_cents) AS costCents,
               CASE WHEN s.total_cents>0 THEN ROUND(SUM(si.total_cents)*
                 (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc
-                 WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash')/s.total_cents)
+                 WHERE mc.business_id=s.business_id AND mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash')/s.total_cents)
                 ELSE 0 END AS cashCents
-            FROM sales s JOIN sale_items si ON si.sale_id=s.id AND si.deleted_at IS NULL
+            FROM sales s JOIN sale_items si ON si.business_id=s.business_id AND si.sale_id=s.id AND si.deleted_at IS NULL
             JOIN products p ON p.id=si.product_id LEFT JOIN inventory_batches b ON b.id=si.batch_id
             WHERE s.business_id=? AND s.deleted_at IS NULL AND ${range("s.created_at")}
             GROUP BY day,s.id,p.id`),
-      ).all<Record<string, unknown>>(),
+      ),
       bindRange(
         this.db.prepare(`
             SELECT ${localDay("r.created_at")} AS day,p.id AS productId,p.name AS productName,
@@ -266,14 +262,14 @@ export class AdminRepository {
               SUM(si.quantity*b.unit_cost_cents) AS costCents,
               CASE WHEN s.total_cents>0 THEN ROUND(SUM(si.total_cents)*
                 (SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc
-                 WHERE mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method='cash')/s.total_cents)
+                 WHERE mc.business_id=r.business_id AND mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method='cash')/s.total_cents)
                 ELSE 0 END AS cashCents
             FROM sale_refunds r JOIN sales s ON s.id=r.sale_id AND s.deleted_at IS NULL
-            JOIN sale_items si ON si.sale_id=s.id AND si.deleted_at IS NULL JOIN products p ON p.id=si.product_id
+            JOIN sale_items si ON si.business_id=s.business_id AND si.sale_id=s.id AND si.deleted_at IS NULL JOIN products p ON p.id=si.product_id
             LEFT JOIN inventory_batches b ON b.id=si.batch_id
             WHERE r.business_id=? AND r.deleted_at IS NULL AND ${range("r.created_at")}
             GROUP BY day,r.id,p.id`),
-      ).all<Record<string, unknown>>(),
+      ),
       bindRange(
         this.db.prepare(`
             SELECT ${localDay("m.created_at")} AS day,p.id AS productId,p.name AS productName,l.type AS locationType,
@@ -282,40 +278,36 @@ export class AdminRepository {
             LEFT JOIN locations l ON l.id=m.source_location_id
             WHERE m.business_id=? AND m.deleted_at IS NULL AND m.movement_type='waste' AND ${range("m.created_at")}
             GROUP BY day,p.id,l.type`),
-      ).all<Record<string, unknown>>(),
+      ),
       bindRange(
         this.db.prepare(`
             SELECT date(movement_date) AS day,expense_type AS expenseType,SUM(amount_cents) AS amountCents
             FROM financial_movements WHERE business_id=? AND deleted_at IS NULL AND type='operatingExpense'
               AND ${range("movement_date")} GROUP BY day,expense_type`),
-      ).all<Record<string, unknown>>(),
+      ),
       bindRange(
         this.db.prepare(`
             SELECT date(movement_date) AS day,type,money_location AS moneyLocation,SUM(amount_cents) AS amountCents
             FROM financial_movements WHERE business_id=? AND deleted_at IS NULL AND ${range("movement_date")}
             GROUP BY day,type,money_location`),
-      ).all<Record<string, unknown>>(),
+      ),
       this.db
         .prepare(
-          `
-            SELECT CASE WHEN a.account_type='cashDrawer' THEN 'cashDeposit' ELSE 'bankAccount' END AS moneyLocation,
+          `SELECT CASE WHEN a.account_type='cashDrawer' THEN 'cashDeposit' ELSE 'bankAccount' END AS moneyLocation,
               SUM(CASE WHEN m.flow='inflow' THEN m.base_amount_cents ELSE -m.base_amount_cents END) AS balanceCents
             FROM monetary_components m JOIN money_accounts a ON a.id=m.money_account_id
             WHERE m.business_id=? AND a.deleted_at IS NULL GROUP BY moneyLocation`,
         )
-        .bind(businessId)
-        .all<Record<string, unknown>>(),
+        .bind(businessId),
       this.db
         .prepare(
-          `
-            SELECT l.id,l.name,l.type,COALESCE(SUM(bs.quantity),0) AS units,
+          `SELECT l.id,l.name,l.type,COALESCE(SUM(bs.quantity),0) AS units,
               COALESCE(SUM(bs.quantity*b.unit_cost_cents),0) AS valueCents
             FROM locations l LEFT JOIN inventory_batch_stocks bs ON bs.location_id=l.id
             LEFT JOIN inventory_batches b ON b.id=bs.batch_id AND b.deleted_at IS NULL
             WHERE l.business_id=? AND l.deleted_at IS NULL AND l.is_active=1 GROUP BY l.id ORDER BY l.type,l.name`,
         )
-        .bind(businessId)
-        .all<Record<string, unknown>>(),
+        .bind(businessId),
       this.db
         .prepare(
           `SELECT ${localDay("created_at")} AS day,
@@ -323,8 +315,7 @@ export class AdminRepository {
            FROM monetary_components WHERE business_id=?
            GROUP BY day ORDER BY day`,
         )
-        .bind(businessId)
-        .all<Record<string, unknown>>(),
+        .bind(businessId),
       this.db
         .prepare(
           `SELECT ${localDay("m.created_at")} AS day,
@@ -339,9 +330,22 @@ export class AdminRepository {
            WHERE m.business_id=? AND m.deleted_at IS NULL
            GROUP BY day ORDER BY day`,
         )
-        .bind(businessId)
-        .all<Record<string, unknown>>(),
-    ]);
+        .bind(businessId),
+    ])) as D1Result<Record<string, unknown>>[];
+    logD1Batch("admin.dashboard", dashboardStartedAt, dashboardResults);
+    const [
+      businessResult,
+      saleRows,
+      refundRows,
+      wasteRows,
+      expenseRows,
+      financeRows,
+      financeBalances,
+      inventoryRows,
+      accountValueRows,
+      inventoryValueRows,
+    ] = dashboardResults;
+    const business = businessResult.results[0] as { tax: number } | undefined;
 
     type Metrics = {
       grossSales: number;

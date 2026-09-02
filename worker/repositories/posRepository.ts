@@ -2,6 +2,7 @@ import {
   MoneyRepository,
   type MonetaryComponentInput,
 } from "./moneyRepository";
+import { observeD1 } from "../db/observability";
 
 type SaleInput = {
   businessId: string;
@@ -118,21 +119,24 @@ export class PosRepository {
         .bind(offlineAuthorizedUntil, active.id, businessId)
         .run();
       active.offlineAuthorizedUntil = offlineAuthorizedUntil;
-      const summary = await this.db
-        .prepare(
-          `SELECT COUNT(*) AS totalOrders,
-          COALESCE(SUM((SELECT COALESCE(SUM(si.quantity),0) FROM sale_items si WHERE si.sale_id=s.id AND si.deleted_at IS NULL)),0) AS totalItems,
-          COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash') THEN 1 ELSE 0 END),0) AS cashOrders,
-          COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash') THEN 1 ELSE 0 END),0) AS cardOrders,
-          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash')),0) AS cashSalesCents,
-          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash')),0) AS cardSalesCents,
-          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method='cash')),0) AS cashRefundsCents,
-          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method<>'cash')),0) AS cardRefundsCents
-          FROM sales s LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL
-          WHERE s.cash_session_id=? AND s.deleted_at IS NULL`,
-        )
-        .bind(active.id)
-        .first<Record<string, number>>();
+      const summary = await observeD1("pos.state.summary", () =>
+        this.db
+          .prepare(
+            `SELECT COUNT(*) AS totalOrders,
+          COALESCE(SUM((SELECT COALESCE(SUM(si.quantity),0) FROM sale_items si WHERE si.business_id=s.business_id AND si.sale_id=s.id AND si.deleted_at IS NULL)),0) AS totalItems,
+          COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash') THEN 1 ELSE 0 END),0) AS cashOrders,
+          COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash') THEN 1 ELSE 0 END),0) AS cardOrders,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method='cash')),0) AS cashSalesCents,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='sale' AND mc.operation_id=s.id AND mc.payment_method<>'cash')),0) AS cardSalesCents,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method='cash')),0) AS cashRefundsCents,
+          COALESCE(SUM((SELECT COALESCE(SUM(mc.base_amount_cents),0) FROM monetary_components mc WHERE mc.business_id=s.business_id AND mc.operation_type='saleRefund' AND mc.operation_id=r.id AND mc.payment_method<>'cash')),0) AS cardRefundsCents
+          FROM sales s LEFT JOIN sale_refunds r ON r.business_id=s.business_id AND r.sale_id=s.id AND r.deleted_at IS NULL
+          WHERE s.business_id=? AND s.cash_session_id=? AND s.deleted_at IS NULL`,
+          )
+          .bind(businessId, active.id)
+          .all<Record<string, number>>(),
+      );
+      const summaryRow = summary.results[0];
       const balanceRows = (
         await this.db
           .prepare(
@@ -152,33 +156,35 @@ export class PosRepository {
         expectedCashAmountCents: Number(
           baseBalance?.expectedAmountMinor ?? active.openingAmountCents,
         ),
-        totalOrders: Number(summary?.totalOrders ?? 0),
-        totalItems: Number(summary?.totalItems ?? 0),
-        cashOrders: Number(summary?.cashOrders ?? 0),
-        cardOrders: Number(summary?.cardOrders ?? 0),
-        cashSalesCents: Number(summary?.cashSalesCents ?? 0),
-        cardSalesCents: Number(summary?.cardSalesCents ?? 0),
-        cashRefundsCents: Number(summary?.cashRefundsCents ?? 0),
-        cardRefundsCents: Number(summary?.cardRefundsCents ?? 0),
+        totalOrders: Number(summaryRow?.totalOrders ?? 0),
+        totalItems: Number(summaryRow?.totalItems ?? 0),
+        cashOrders: Number(summaryRow?.cashOrders ?? 0),
+        cardOrders: Number(summaryRow?.cardOrders ?? 0),
+        cashSalesCents: Number(summaryRow?.cashSalesCents ?? 0),
+        cardSalesCents: Number(summaryRow?.cardSalesCents ?? 0),
+        cashRefundsCents: Number(summaryRow?.cashRefundsCents ?? 0),
+        cardRefundsCents: Number(summaryRow?.cardRefundsCents ?? 0),
         balances: balanceRows,
       };
       products = (
-        await this.db
-          .prepare(
-            `SELECT p.id,p.name,p.image_id AS imageId,p.category_id AS categoryId,
+        await observeD1("pos.state.products", () =>
+          this.db
+            .prepare(
+              `SELECT p.id,p.name,p.image_id AS imageId,p.category_id AS categoryId,
               c.name AS categoryName,COALESCE(c.icon,'🛒') AS categoryIcon,COALESCE(SUM(bs.quantity),0) AS stock,
         COALESCE((SELECT b2.cash_price_cents FROM inventory_batches b2 JOIN inventory_batch_stocks bs2 ON bs2.batch_id=b2.id WHERE b2.business_id=p.business_id AND b2.product_id=p.id AND bs2.location_id=? AND bs2.quantity>0 AND b2.deleted_at IS NULL ORDER BY b2.received_at,b2.id LIMIT 1),0) AS cashPriceCents,
         COALESCE((SELECT b2.card_price_cents FROM inventory_batches b2 JOIN inventory_batch_stocks bs2 ON bs2.batch_id=b2.id WHERE b2.business_id=p.business_id AND b2.product_id=p.id AND bs2.location_id=? AND bs2.quantity>0 AND b2.deleted_at IS NULL ORDER BY b2.received_at,b2.id LIMIT 1),0) AS cardPriceCents
         FROM products p LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN inventory_batches b ON b.product_id=p.id AND b.business_id=p.business_id AND b.deleted_at IS NULL LEFT JOIN inventory_batch_stocks bs ON bs.batch_id=b.id AND bs.location_id=?
         WHERE p.business_id=? AND p.deleted_at IS NULL AND p.is_active=1 GROUP BY p.id ORDER BY p.name`,
-          )
-          .bind(
-            active.locationId,
-            active.locationId,
-            active.locationId,
-            businessId,
-          )
-          .all()
+            )
+            .bind(
+              active.locationId,
+              active.locationId,
+              active.locationId,
+              businessId,
+            )
+            .all(),
+        )
       ).results;
     }
     return {
@@ -571,9 +577,9 @@ export class PosRepository {
       COALESCE((SELECT json_group_array(json_object('id',m.id,'paymentMethod',m.payment_method,
         'currencyCode',m.currency_code,'amountMinor',m.amount_minor,'exchangeRateScaled',m.exchange_rate_scaled,
         'baseAmountCents',m.base_amount_cents)) FROM monetary_components m
-        WHERE m.operation_type='sale' AND m.operation_id=s.id),'[]') AS payments,
-      COALESCE((SELECT json_group_array(json_object('id',x.id,'productName',x.product_name,'quantity',x.quantity,'unitPriceCents',x.unit_price_cents,'totalCents',x.total_cents)) FROM (SELECT si.* FROM sale_items si WHERE si.sale_id=s.id AND si.deleted_at IS NULL ORDER BY si.created_at,si.id) x),'[]') AS items
-      FROM sales s LEFT JOIN sale_refunds r ON r.sale_id=s.id AND r.deleted_at IS NULL WHERE s.business_id=? AND s.cash_session_id=? AND s.deleted_at IS NULL ORDER BY s.created_at DESC,s.id DESC`,
+        WHERE m.business_id=s.business_id AND m.operation_type='sale' AND m.operation_id=s.id),'[]') AS payments,
+      COALESCE((SELECT json_group_array(json_object('id',x.id,'productName',x.product_name,'quantity',x.quantity,'unitPriceCents',x.unit_price_cents,'totalCents',x.total_cents)) FROM (SELECT si.* FROM sale_items si WHERE si.business_id=s.business_id AND si.sale_id=s.id AND si.deleted_at IS NULL ORDER BY si.created_at,si.id) x),'[]') AS items
+      FROM sales s LEFT JOIN sale_refunds r ON r.business_id=s.business_id AND r.sale_id=s.id AND r.deleted_at IS NULL WHERE s.business_id=? AND s.cash_session_id=? AND s.deleted_at IS NULL ORDER BY s.created_at DESC,s.id DESC`,
       )
       .bind(businessId, session.id)
       .all<Record<string, unknown>>();

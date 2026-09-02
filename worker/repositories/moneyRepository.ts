@@ -29,7 +29,7 @@ export class MoneyRepository {
             `SELECT id,name,account_type AS accountType,currency_code AS currencyCode,
              location_id AS locationId,is_active AS isActive,
              COALESCE((SELECT SUM(CASE WHEN mc.flow='inflow' THEN mc.amount_minor ELSE -mc.amount_minor END)
-               FROM monetary_components mc WHERE mc.money_account_id=money_accounts.id),0) AS movementBalanceMinor
+               FROM monetary_components mc WHERE mc.business_id=money_accounts.business_id AND mc.money_account_id=money_accounts.id),0) AS movementBalanceMinor
            FROM money_accounts WHERE business_id=? AND deleted_at IS NULL
            ORDER BY currency_code,account_type,name`,
           )
@@ -201,7 +201,7 @@ export class MoneyRepository {
             'amountMinor',m.amount_minor,'baseAmountCents',m.base_amount_cents,
             'moneyAccountId',m.money_account_id,'accountName',a.name
           )) FROM monetary_components m JOIN money_accounts a ON a.id=m.money_account_id
-          WHERE m.operation_type='currencyExchange' AND m.operation_id=e.id),'[]') components
+          WHERE m.business_id=e.business_id AND m.operation_type='currencyExchange' AND m.operation_id=e.id),'[]') components
          FROM currency_exchanges e WHERE e.business_id=?
          ORDER BY e.exchange_date DESC,e.id DESC LIMIT 500`,
       )
