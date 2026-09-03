@@ -128,6 +128,23 @@ export type InvoiceReconciliationMovement = {
   totalCostCents: number;
 };
 
+export type InvoiceRotationProduct = {
+  productId: string;
+  productName: string;
+  batchCount: number;
+  purchasedQuantity: number;
+  purchasedCostCents: number;
+  remainingQuantity: number;
+  remainingCostCents: number;
+  grossSoldQuantity: number;
+  returnedQuantity: number;
+  soldQuantity: number;
+  consumedQuantity: number;
+  withdrawnQuantity: number;
+  wasteQuantity: number;
+  otherExitQuantity: number;
+};
+
 export type Category = {
   id: string;
   name: string;

@@ -12,6 +12,7 @@ import {
 import { PageSpinner } from "../components/Spinner";
 import type {
   InvoiceReconciliationMovement,
+  InvoiceRotationProduct,
   Supplier,
   SupplierInvoice,
   MoneySettings,
@@ -49,6 +50,13 @@ export function SupplierInvoicesPage() {
     invoice: SupplierInvoice;
     movements: InvoiceReconciliationMovement[];
   } | null>(null);
+  const [rotation, setRotation] = useState<{
+    invoice: SupplierInvoice;
+    products: InvoiceRotationProduct[];
+  } | null>(null);
+  const [loadingRotationId, setLoadingRotationId] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [moneySettings, setMoneySettings] = useState<MoneySettings | null>(
@@ -128,6 +136,22 @@ export function SupplierInvoicesPage() {
           ? reason.message
           : "No se pudo cargar la conciliación",
       );
+    }
+  }
+  async function showRotation(invoice: SupplierInvoice) {
+    setError("");
+    setLoadingRotationId(invoice.id);
+    try {
+      const result = await api.supplierInvoiceRotation(invoice.id);
+      setRotation({ invoice, products: result.products });
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "No se pudo cargar la rotación de la factura",
+      );
+    } finally {
+      setLoadingRotationId(null);
     }
   }
   async function submit(values: {
@@ -327,6 +351,20 @@ export function SupplierInvoicesPage() {
                       )}
                     </td>
                     <td className="px-5 text-right">
+                      {inventoryExitPercentage !== null &&
+                        inventoryExitPercentage < 100 && (
+                          <button
+                            type="button"
+                            disabled={loadingRotationId === invoice.id}
+                            onClick={() => void showRotation(invoice)}
+                            className="mr-2 rounded-xl border border-amber-200 px-3 py-2 text-xs font-black text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                            aria-label={`Ver rotación de la factura ${invoice.invoiceNumber}`}
+                          >
+                            {loadingRotationId === invoice.id
+                              ? "Cargando…"
+                              : "Rotación"}
+                          </button>
+                        )}
                       {invoice.pendingAmountCents > 0 && (
                         <button
                           onClick={() => openPayment(invoice)}
@@ -591,6 +629,115 @@ export function SupplierInvoicesPage() {
                   factura.
                 </p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {rotation && (
+        <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/45 p-4">
+          <div className="mx-auto my-10 w-full max-w-6xl rounded-[2rem] bg-white p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-black">Rotación por producto</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Factura {rotation.invoice.invoiceNumber} ·{" "}
+                  {rotation.invoice.supplierName}
+                </p>
+              </div>
+              <button type="button" onClick={() => setRotation(null)}>
+                <X />
+              </button>
+            </div>
+            <p className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              Vendido descuenta las devoluciones. Otras salidas reúne ajustes
+              negativos y unidades usadas en transformación o desensamble.
+            </p>
+            <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full min-w-[1100px] text-left">
+                <thead className="text-xs uppercase text-slate-400">
+                  <tr>
+                    <th className="px-4 py-3">Producto</th>
+                    <th>Comprado</th>
+                    <th>Vendido neto</th>
+                    <th>Consumo</th>
+                    <th>Retiro</th>
+                    <th>Merma</th>
+                    <th>Otras salidas</th>
+                    <th>No vendido</th>
+                    <th className="min-w-40 pr-4">Rotación</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rotation.products.map((product) => {
+                    const percentage = product.purchasedQuantity
+                      ? Math.min(
+                          100,
+                          Math.max(
+                            0,
+                            ((product.purchasedQuantity -
+                              product.remainingQuantity) /
+                              product.purchasedQuantity) *
+                              100,
+                          ),
+                        )
+                      : 0;
+                    return (
+                      <tr
+                        key={product.productId}
+                        className="border-t border-slate-100"
+                      >
+                        <td className="px-4 py-4">
+                          <p className="font-black">{product.productName}</p>
+                          <p className="text-xs text-slate-400">
+                            {product.batchCount} {product.batchCount === 1 ? "lote" : "lotes"} · costo{" "}
+                            {money(product.purchasedCostCents)}
+                          </p>
+                        </td>
+                        <td className="font-bold">
+                          {formatQuantity(product.purchasedQuantity)}
+                        </td>
+                        <td>
+                          <p className="font-black text-emerald-700">
+                            {formatQuantity(product.soldQuantity)}
+                          </p>
+                          {product.returnedQuantity > 0 && (
+                            <p className="text-xs text-slate-400">
+                              {formatQuantity(product.grossSoldQuantity)} brutas ·{" "}
+                              {formatQuantity(product.returnedQuantity)} devueltas
+                            </p>
+                          )}
+                        </td>
+                        <td>{formatQuantity(product.consumedQuantity)}</td>
+                        <td>{formatQuantity(product.withdrawnQuantity)}</td>
+                        <td>{formatQuantity(product.wasteQuantity)}</td>
+                        <td>{formatQuantity(product.otherExitQuantity)}</td>
+                        <td>
+                          <p className="font-black">
+                            {formatQuantity(product.remainingQuantity)}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {money(product.remainingCostCents)} al costo
+                          </p>
+                        </td>
+                        <td className="pr-4">
+                          <p className="mb-1 text-xs font-black">
+                            {percentage.toLocaleString("es", {
+                              maximumFractionDigits: 1,
+                            })}
+                            %
+                          </p>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-amber-500"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

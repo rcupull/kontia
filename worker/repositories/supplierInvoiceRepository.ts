@@ -86,6 +86,68 @@ export class SupplierInvoiceRepository {
     return result.results;
   }
 
+  async rotation(businessId: string, invoiceId: string) {
+    const invoice = await this.db
+      .prepare(
+        `SELECT id FROM supplier_invoices WHERE id=? AND business_id=? AND deleted_at IS NULL`,
+      )
+      .bind(invoiceId, businessId)
+      .first();
+    if (!invoice) return null;
+    const result = await this.db
+      .prepare(
+        `WITH invoice_batches AS (
+          SELECT b.id,b.product_id,b.initial_quantity,b.unit_cost_cents
+          FROM inventory_batches b
+          WHERE b.business_id=? AND b.supplier_invoice_id=? AND b.deleted_at IS NULL
+        ), batch_summary AS (
+          SELECT ib.product_id,
+            SUM(ib.initial_quantity) AS purchasedQuantity,
+            SUM(ib.initial_quantity*ib.unit_cost_cents) AS purchasedCostCents,
+            SUM(COALESCE((SELECT SUM(bs.quantity) FROM inventory_batch_stocks bs
+              WHERE bs.business_id=? AND bs.batch_id=ib.id),0)) AS remainingQuantity,
+            SUM(COALESCE((SELECT SUM(bs.quantity) FROM inventory_batch_stocks bs
+              WHERE bs.business_id=? AND bs.batch_id=ib.id),0)*ib.unit_cost_cents) AS remainingCostCents,
+            COUNT(*) AS batchCount
+          FROM invoice_batches ib GROUP BY ib.product_id
+        ), movement_summary AS (
+          SELECT ib.product_id,
+            SUM(CASE WHEN m.movement_type IN ('sale','externalSale') THEN m.quantity ELSE 0 END) AS grossSoldQuantity,
+            SUM(CASE WHEN m.movement_type='customerReturn' THEN m.quantity ELSE 0 END) AS returnedQuantity,
+            SUM(CASE WHEN m.movement_type='internalConsumption' THEN m.quantity ELSE 0 END) AS consumedQuantity,
+            SUM(CASE WHEN m.movement_type='ownerWithdrawal' THEN m.quantity ELSE 0 END) AS withdrawnQuantity,
+            SUM(CASE WHEN m.movement_type='waste' THEN m.quantity ELSE 0 END) AS wasteQuantity,
+            SUM(CASE WHEN m.movement_type IN ('negativeAdjustment','transformation','disassembly') THEN m.quantity ELSE 0 END) AS otherExitQuantity
+          FROM invoice_batches ib
+          LEFT JOIN inventory_movements m ON m.business_id=? AND m.batch_id=ib.id AND m.deleted_at IS NULL
+          GROUP BY ib.product_id
+        )
+        SELECT p.id AS productId,p.name AS productName,bs.batchCount,
+          bs.purchasedQuantity,bs.purchasedCostCents,bs.remainingQuantity,bs.remainingCostCents,
+          COALESCE(ms.grossSoldQuantity,0) AS grossSoldQuantity,
+          COALESCE(ms.returnedQuantity,0) AS returnedQuantity,
+          COALESCE(ms.grossSoldQuantity,0)-COALESCE(ms.returnedQuantity,0) AS soldQuantity,
+          COALESCE(ms.consumedQuantity,0) AS consumedQuantity,
+          COALESCE(ms.withdrawnQuantity,0) AS withdrawnQuantity,
+          COALESCE(ms.wasteQuantity,0) AS wasteQuantity,
+          COALESCE(ms.otherExitQuantity,0) AS otherExitQuantity
+        FROM batch_summary bs
+        JOIN products p ON p.id=bs.product_id AND p.business_id=?
+        LEFT JOIN movement_summary ms ON ms.product_id=bs.product_id
+        ORDER BY p.name COLLATE NOCASE`,
+      )
+      .bind(
+        businessId,
+        invoiceId,
+        businessId,
+        businessId,
+        businessId,
+        businessId,
+      )
+      .all();
+    return result.results;
+  }
+
   async create(businessId: string, input: SupplierInvoiceInput) {
     const supplier = await this.db
       .prepare(

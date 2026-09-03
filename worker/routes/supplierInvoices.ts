@@ -33,6 +33,15 @@ supplierInvoiceRoutes.get("/:id/reconciliation", async (c) => {
     ? c.json({ movements })
     : c.json({ error: "Factura no encontrada" }, 404);
 });
+supplierInvoiceRoutes.get("/:id/rotation", async (c) => {
+  const products = await new SupplierInvoiceRepository(c.env.DB).rotation(
+    c.get("sessionUser").businessId,
+    c.req.param("id"),
+  );
+  return products
+    ? c.json({ products })
+    : c.json({ error: "Factura no encontrada" }, 404);
+});
 supplierInvoiceRoutes.post("/", zValidator("json", input), async (c) => {
   try {
     const id = await new SupplierInvoiceRepository(c.env.DB).create(
