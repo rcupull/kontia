@@ -26,7 +26,7 @@ const financial = z.object({
   description: z.string().trim().min(1).max(200),
   movementDate: z.string().datetime({ offset: true }),
   notes: z.string().trim().max(500).optional(),
-  components: z.array(monetaryComponentSchema).min(1).max(12).optional(),
+  components: z.array(monetaryComponentSchema).max(12).optional(),
 });
 adminRoutes.get("/sales", async (c) =>
   c.json({
