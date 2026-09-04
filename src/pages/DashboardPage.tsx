@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { FormProvider, useForm } from "react-hook-form";
 import {
   Archive,
   ArrowDownCircle,
@@ -27,11 +28,13 @@ import {
 import { api, type DashboardMetrics } from "../api";
 import type { MoneySettings } from "../types";
 import { Chart, type ChartData } from "../components/chart";
+import { FieldDateTimePicker } from "../components/fields";
 import { PageSpinner } from "../components/Spinner";
 
 type DashboardData = Awaited<ReturnType<typeof api.dashboard>>;
 type Tab = "general" | "products" | "finance" | "accounts" | "inventory";
-type RangeKey = "all" | "thisMonth" | "lastMonth" | "thisWeek" | "lastWeek";
+type RangeKey =
+  "all" | "thisMonth" | "lastMonth" | "thisWeek" | "lastWeek" | "day";
 const money = (value: number) =>
   new Intl.NumberFormat("es", { style: "currency", currency: "CUP" }).format(
     Number(value || 0) / 100,
@@ -188,10 +191,15 @@ const typeLabels: Record<string, string> = {
   other: "Otros",
 };
 
-function rangeFor(key: RangeKey) {
+function rangeFor(key: RangeKey, selectedDay?: string) {
   const today = new Date(),
     week = { weekStartsOn: 1 as const };
   let from: Date | undefined, to: Date | undefined;
+  if (key === "day" && selectedDay) {
+    const [year, month, day] = selectedDay.split("-").map(Number);
+    from = new Date(year, month - 1, day, 0, 0, 0, 0);
+    to = new Date(year, month - 1, day, 23, 59, 59, 999);
+  }
   if (key === "thisMonth")
     [from, to] = [startOfMonth(today), endOfMonth(today)];
   if (key === "lastMonth") {
@@ -940,7 +948,19 @@ export function DashboardPage() {
     [selectedMetrics, setSelectedMetrics] =
       useState<MetricKey[]>(storedMetricKeys),
     [parametersOpen, setParametersOpen] = useState(false);
-  const dates = useMemo(() => rangeFor(range), [range]);
+  const dateMethods = useForm<{ reportDate: string }>({
+    defaultValues: { reportDate: "" },
+  });
+  const selectedDay = dateMethods.watch("reportDate");
+  const isReportTab = tab === "general" || tab === "products";
+  const dates = useMemo<{ from?: string; to?: string }>(
+    () => (isReportTab ? rangeFor(range, selectedDay) : {}),
+    [isReportTab, range, selectedDay],
+  );
+  useEffect(() => {
+    if (selectedDay) setRange("day");
+    else if (range === "day") setRange("all");
+  }, [range, selectedDay]);
   useEffect(() => {
     setData(null);
     setMoneySettings(null);
@@ -981,32 +1001,9 @@ export function DashboardPage() {
         Resumen
       </p>
       <h1 className="mt-1 text-3xl font-black">Dashboard</h1>
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <p className="mt-2 text-slate-500">
-          Ventas, rentabilidad, finanzas e inventario en un solo lugar.
-        </p>
-        {(tab === "general" || tab === "products") && (
-          <button
-            type="button"
-            onClick={() => setParametersOpen(true)}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-black text-slate-600 shadow-sm"
-          >
-            <SlidersHorizontal size={18} /> Parámetros del reporte
-          </button>
-        )}
-      </div>
-      <div className="mt-5 flex flex-wrap gap-2">
-        {ranges.map(([key, label]) => (
-          <button
-            type="button"
-            key={key}
-            onClick={() => setRange(key)}
-            className={`rounded-xl border px-3 py-2 text-sm font-black ${range === key ? "border-emerald-700 bg-emerald-700 text-white" : "border-slate-200 bg-white text-slate-600"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <p className="mt-2 text-slate-500">
+        Ventas, rentabilidad, finanzas e inventario en un solo lugar.
+      </p>
       <div className="mt-5 flex gap-2 overflow-x-auto border-b border-slate-200">
         {tabs.map(([key, label]) => (
           <button
@@ -1019,6 +1016,45 @@ export function DashboardPage() {
           </button>
         ))}
       </div>
+      {isReportTab && (
+        <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="flex flex-wrap gap-2">
+              {ranges.map(([key, label]) => (
+                <button
+                  type="button"
+                  key={key}
+                  onClick={() => {
+                    dateMethods.setValue("reportDate", "");
+                    setRange(key);
+                  }}
+                  className={`rounded-xl border px-3 py-2 text-sm font-black ${range === key ? "border-emerald-700 bg-emerald-700 text-white" : "border-slate-200 bg-white text-slate-600"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <FormProvider {...dateMethods}>
+              <FieldDateTimePicker
+                label="Día específico"
+                valueFormat="date"
+                allowDaysAfterNow={0}
+                emptyLabel="Elegir día"
+                clearable
+                className="sm:w-52"
+                register={dateMethods.register("reportDate")}
+              />
+            </FormProvider>
+          </div>
+          <button
+            type="button"
+            onClick={() => setParametersOpen(true)}
+            className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-black text-slate-600"
+          >
+            <SlidersHorizontal size={18} /> Parámetros del reporte
+          </button>
+        </div>
+      )}
       {error && (
         <p className="mt-6 rounded-2xl bg-red-50 p-4 font-bold text-red-700">
           {error}
