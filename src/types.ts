@@ -2,7 +2,8 @@ export type SessionUser = {
   id: string;
   businessId: string;
   displayName: string;
-  role: "owner" | "manager" | "seller";
+  role: "owner" | "manager" | "seller" | "investor";
+  hasInvestorAccess?: number;
 };
 
 export type Business = {
@@ -61,7 +62,9 @@ export type BusinessUser = {
   id: string;
   username: string;
   displayName: string;
-  role: "owner" | "manager" | "seller";
+  role: "owner" | "manager" | "seller" | "investor";
+  investorId?: string;
+  investorName?: string;
   isActive: number;
   createdAt: string;
   updatedAt: string;

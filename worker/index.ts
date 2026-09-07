@@ -14,6 +14,8 @@ import { businessRoutes } from "./routes/businesses";
 import { moneyRoutes } from "./routes/money";
 import { externalRoutes } from "./routes/external";
 import { investmentRoutes } from "./routes/investments";
+import { investorPortalRoutes } from "./routes/investorPortal";
+import { InvestorPortalRepository } from "./repositories/investorPortalRepository";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -48,9 +50,28 @@ for (const resource of [
   "businesses",
   "money",
   "investments",
+  "investor-portal",
 ]) {
   app.use(`/api/${resource}`, requireSession);
   app.use(`/api/${resource}/*`, requireSession);
+  if (resource !== "investor-portal") {
+    app.use(`/api/${resource}`, async (c, next) => {
+      if (c.get("sessionUser").role === "investor")
+        return c.json(
+          { error: "El acceso del inversor es solo de lectura" },
+          403,
+        );
+      await next();
+    });
+    app.use(`/api/${resource}/*`, async (c, next) => {
+      if (c.get("sessionUser").role === "investor")
+        return c.json(
+          { error: "El acceso del inversor es solo de lectura" },
+          403,
+        );
+      await next();
+    });
+  }
 }
 app.route("/api/products", productRoutes);
 app.route("/api/categories", categoryRoutes);
@@ -66,5 +87,11 @@ app.route("/api/users", userRoutes);
 app.route("/api/businesses", businessRoutes);
 app.route("/api/money", moneyRoutes);
 app.route("/api/investments", investmentRoutes);
+app.route("/api/investor-portal", investorPortalRoutes);
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled: async (_controller: ScheduledController, env: Bindings) => {
+    await new InvestorPortalRepository(env.DB).snapshotAllBusinesses();
+  },
+};

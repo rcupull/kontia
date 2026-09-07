@@ -195,6 +195,15 @@ valor patrimonial inmediatamente anterior al retiro. Por eso puede modificar
 los porcentajes de todos los inversores. Es una operación distinta de una
 distribución de ganancias, que no altera las unidades.
 
+### Portal del inversor
+
+`user_investor_access` autoriza qué posición puede consultar cada usuario. El
+rol `investor` queda bloqueado en todas las API operativas y solo consume el
+portal de lectura; el identificador del inversor se resuelve en el servidor a
+partir de la sesión. `investment_valuation_snapshots` congela diariamente la
+tesorería, el inventario, el patrimonio estimado y las unidades para alimentar
+la evolución histórica sin recalcular el pasado.
+
 ## Seguridad e integridad
 
 - Las contraseñas se derivan y nunca se almacenan en texto plano.

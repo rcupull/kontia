@@ -211,7 +211,7 @@ export const api = {
   createUser: (input: {
     username: string;
     displayName: string;
-    role: "manager" | "seller";
+    role: "manager" | "seller" | "investor";
     password: string;
   }) =>
     request<{ id: string }>("/api/users", {
@@ -223,7 +223,7 @@ export const api = {
     input: {
       username: string;
       displayName: string;
-      role: "manager" | "seller";
+      role: "manager" | "seller" | "investor";
       password?: string;
       isActive: boolean;
     },
@@ -232,6 +232,34 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  setUserInvestorAccess: (userId: string, investorId: string | null) =>
+    request<{ ok: boolean }>(`/api/users/${userId}/investor-access`, {
+      method: "PUT",
+      body: JSON.stringify({ investorId }),
+    }),
+  myInvestment: () =>
+    request<{
+      baseCurrency: string;
+      investor: import("./types").Investor & {
+        accumulatedReturnCents: number;
+        returnBps: number;
+      };
+      series: {
+        capital: Array<{
+          day: string;
+          businessEquityCents: number;
+          patrimonyCents: number;
+        }>;
+        sales: Array<{ day: string; salesCents: number }>;
+      };
+      movements: Array<{
+        id: string;
+        entryType: string;
+        amountCents: number;
+        entryDate: string;
+        notes?: string;
+      }>;
+    }>("/api/investor-portal/me"),
   products: () => request<{ products: Product[] }>("/api/products"),
   categories: () => request<{ categories: Category[] }>("/api/categories"),
   createCategory: (input: { name: string; icon: string }) =>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
 import { Pencil, Plus, Search, ShieldCheck, UserRound, X } from "lucide-react";
 import { api } from "../api";
@@ -9,12 +9,12 @@ import {
   FieldSelect,
 } from "../components/fields";
 import { PageSpinner } from "../components/Spinner";
-import type { BusinessUser } from "../types";
+import type { BusinessUser, Investor } from "../types";
 
 type FormValues = {
   username: string;
   displayName: string;
-  role: "manager" | "seller";
+  role: "manager" | "seller" | "investor";
   password: string;
   isActive: "true" | "false";
 };
@@ -22,11 +22,64 @@ const roleLabel = {
   owner: "Propietario",
   manager: "Administrador",
   seller: "Vendedor",
+  investor: "Inversor",
 };
+
+function InvestorAccessSelect({
+  user,
+  investors,
+  onChange,
+}: {
+  user: BusinessUser;
+  investors: Investor[];
+  onChange: (investorId: string | null) => Promise<void>;
+}) {
+  const methods = useForm<{ investorId: string }>({
+    defaultValues: { investorId: user.investorId ?? "" },
+  });
+  const savedValue = useRef(user.investorId ?? "");
+  useEffect(() => {
+    const next = user.investorId ?? "";
+    savedValue.current = next;
+    methods.reset({ investorId: next });
+  }, [methods, user.investorId]);
+  useEffect(() => {
+    const subscription = methods.watch((values, { name }) => {
+      if (name !== "investorId") return;
+      const next = String(values.investorId ?? "");
+      if (next === savedValue.current) return;
+      const previous = savedValue.current;
+      savedValue.current = next;
+      void onChange(next || null).catch(() => {
+        savedValue.current = previous;
+        methods.reset({ investorId: previous });
+      });
+    });
+    return () => subscription.unsubscribe();
+  }, [methods, onChange]);
+  return (
+    <FormProvider {...methods}>
+      <FieldSelect
+        label=""
+        className="min-w-44"
+        options={investors.map((investor) => ({
+          value: investor.id,
+          label: investor.name,
+        }))}
+        getExtraOptions={(options) => [
+          { value: "", label: "Sin acceso" },
+          ...options,
+        ]}
+        register={methods.register("investorId")}
+      />
+    </FormProvider>
+  );
+}
 
 export function UsersPage() {
   const { user: sessionUser } = useAuth();
   const [users, setUsers] = useState<BusinessUser[]>([]),
+    [investors, setInvestors] = useState<Investor[]>([]),
     [search, setSearch] = useState(""),
     [editing, setEditing] = useState<BusinessUser | null>(null),
     [open, setOpen] = useState(false),
@@ -42,8 +95,12 @@ export function UsersPage() {
     },
   });
   async function load(value = search) {
-    const result = await api.users(value);
+    const [result, investmentData] = await Promise.all([
+      api.users(value),
+      api.investments(),
+    ]);
     setUsers(result.users);
+    setInvestors(investmentData.investors);
   }
   useEffect(() => {
     if (sessionUser?.role !== "owner") return;
@@ -64,7 +121,10 @@ export function UsersPage() {
         ? {
             username: user.username,
             displayName: user.displayName,
-            role: user.role === "manager" ? "manager" : "seller",
+            role:
+              user.role === "manager" || user.role === "investor"
+                ? user.role
+                : "seller",
             password: "",
             isActive: user.isActive ? "true" : "false",
           }
@@ -160,6 +220,7 @@ export function UsersPage() {
               <th>Usuario</th>
               <th>Rol</th>
               <th>Estado</th>
+              <th>Inversor visible</th>
               <th>Creado</th>
               <th />
             </tr>
@@ -171,6 +232,26 @@ export function UsersPage() {
                 <td>{user.username}</td>
                 <td>
                   <span className="font-bold">{roleLabel[user.role]}</span>
+                </td>
+                <td>
+                  <InvestorAccessSelect
+                    user={user}
+                    investors={investors}
+                    onChange={async (investorId) => {
+                      setError("");
+                      try {
+                        await api.setUserInvestorAccess(user.id, investorId);
+                        await load();
+                      } catch (reason) {
+                        const message =
+                          reason instanceof Error
+                            ? reason.message
+                            : "No se pudo vincular";
+                        setError(message);
+                        throw reason;
+                      }
+                    }}
+                  />
                 </td>
                 <td>
                   <span
@@ -253,6 +334,7 @@ export function UsersPage() {
                   options={[
                     { value: "manager", label: "Administrador" },
                     { value: "seller", label: "Vendedor" },
+                    { value: "investor", label: "Inversor (solo lectura)" },
                   ]}
                   register={methods.register("role", { required: true })}
                 />

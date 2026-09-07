@@ -25,6 +25,7 @@ import {
   MapPin,
   ArrowLeftRight,
   PieChart,
+  TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { api } from "../api";
@@ -45,6 +46,7 @@ const sections = [
   { to: "/admin/financial-movements", label: "Finanzas", icon: BarChart3 },
   { to: "/admin/money", label: "Cambios de moneda", icon: ArrowLeftRight },
   { to: "/admin/investments", label: "Inversiones", icon: PieChart },
+  { to: "/my-investment", label: "Mi inversión", icon: TrendingUp },
   { to: "/admin/users", label: "Usuarios", icon: Users },
   { to: "/admin/businesses", label: "Negocios", icon: Store },
   { to: "/admin/maintenance", label: "Mantenimiento", icon: Wrench },
@@ -81,11 +83,14 @@ export function AdminLayout() {
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
         {sections
-          .filter(
-            ({ to }) =>
+          .filter(({ to }) => {
+            if (to === "/my-investment")
+              return Boolean(user?.hasInvestorAccess);
+            return (
               !["/admin/users", "/admin/investments"].includes(to) ||
-              user?.role === "owner",
-          )
+              user?.role === "owner"
+            );
+          })
           .map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
