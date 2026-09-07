@@ -14,7 +14,8 @@ export type SessionUser = {
   id: string;
   businessId: string;
   displayName: string;
-  role: "owner" | "manager" | "seller";
+  role: "owner" | "manager" | "seller" | "investor";
+  hasInvestorAccess?: number;
 };
 
 export type Variables = { sessionUser: SessionUser };

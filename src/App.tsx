@@ -15,6 +15,8 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { UsersPage } from "./pages/UsersPage";
 import { BusinessesPage } from "./pages/BusinessesPage";
 import { MoneyPage } from "./pages/MoneyPage";
+import { InvestmentsPage } from "./pages/InvestmentsPage";
+import { MyInvestmentPage } from "./pages/MyInvestmentPage";
 import {
   CashSessionsPage,
   FinancialMovementsPage,
@@ -30,8 +32,16 @@ export default function App() {
       </main>
     );
   if (!user) return <AuthPage />;
+  if (user.role === "investor")
+    return (
+      <Routes>
+        <Route path="/my-investment" element={<MyInvestmentPage />} />
+        <Route path="*" element={<Navigate to="/my-investment" replace />} />
+      </Routes>
+    );
   return (
     <Routes>
+      <Route path="/my-investment" element={<MyInvestmentPage />} />
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
@@ -57,6 +67,7 @@ export default function App() {
           element={<FinancialMovementsPage />}
         />
         <Route path="money" element={<MoneyPage />} />
+        <Route path="investments" element={<InvestmentsPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="businesses" element={<BusinessesPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />

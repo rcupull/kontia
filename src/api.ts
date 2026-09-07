@@ -16,6 +16,7 @@ import type {
   Business,
   MoneySettings,
   MonetaryComponentInput,
+  InvestmentSummary,
 } from "./types";
 
 export type DashboardMetrics = {
@@ -131,6 +132,58 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  investments: () => request<InvestmentSummary>("/api/investments"),
+  createInvestor: (input: { name: string; notes?: string }) =>
+    request<{ id: string }>("/api/investments/investors", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  setInvestorStatus: (id: string, isActive: boolean) =>
+    request<{ ok: boolean }>(`/api/investments/investors/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ isActive }),
+    }),
+  createInvestmentContribution: (input: {
+    investorId: string;
+    amountCents: number;
+    preMoneyValuationCents?: number;
+    entryDate: string;
+    notes?: string;
+    affectsCash: boolean;
+    components?: MonetaryComponentInput[];
+  }) =>
+    request<{ id: string }>("/api/investments/contributions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  createInvestmentDistribution: (input: {
+    amountCents: number;
+    entryDate: string;
+    notes?: string;
+    components: MonetaryComponentInput[];
+  }) =>
+    request<{
+      batchId: string;
+      allocations: Array<{
+        investorId: string;
+        investorName: string;
+        amountCents: number;
+      }>;
+    }>("/api/investments/distributions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  createInvestmentWithdrawal: (input: {
+    investorId: string;
+    amountCents: number;
+    entryDate: string;
+    notes?: string;
+    components: MonetaryComponentInput[];
+  }) =>
+    request<{ id: string; unitsBurned: number; maximumCents: number }>(
+      "/api/investments/withdrawals",
+      { method: "POST", body: JSON.stringify(input) },
+    ),
   setupStatus: () => request<{ required: boolean }>("/api/auth/setup/status"),
   setup: (input: {
     bootstrapSecret: string;
@@ -158,7 +211,7 @@ export const api = {
   createUser: (input: {
     username: string;
     displayName: string;
-    role: "manager" | "seller";
+    role: "manager" | "seller" | "investor";
     password: string;
   }) =>
     request<{ id: string }>("/api/users", {
@@ -170,7 +223,7 @@ export const api = {
     input: {
       username: string;
       displayName: string;
-      role: "manager" | "seller";
+      role: "manager" | "seller" | "investor";
       password?: string;
       isActive: boolean;
     },
@@ -179,6 +232,34 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  setUserInvestorAccess: (userId: string, investorId: string | null) =>
+    request<{ ok: boolean }>(`/api/users/${userId}/investor-access`, {
+      method: "PUT",
+      body: JSON.stringify({ investorId }),
+    }),
+  myInvestment: () =>
+    request<{
+      baseCurrency: string;
+      investor: import("./types").Investor & {
+        accumulatedReturnCents: number;
+        returnBps: number;
+      };
+      series: {
+        capital: Array<{
+          day: string;
+          businessEquityCents: number;
+          patrimonyCents: number;
+        }>;
+        sales: Array<{ day: string; salesCents: number }>;
+      };
+      movements: Array<{
+        id: string;
+        entryType: string;
+        amountCents: number;
+        entryDate: string;
+        notes?: string;
+      }>;
+    }>("/api/investor-portal/me"),
   products: () => request<{ products: Product[] }>("/api/products"),
   categories: () => request<{ categories: Category[] }>("/api/categories"),
   createCategory: (input: { name: string; icon: string }) =>

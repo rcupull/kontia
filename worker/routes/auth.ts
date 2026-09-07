@@ -102,8 +102,12 @@ authRoutes.post(
   async (c) => {
     const input = c.req.valid("json");
     const user = await c.env.DB.prepare(
-      `SELECT id, business_id, display_name, role, password_hash, password_salt
-      FROM users WHERE username = ? COLLATE NOCASE AND is_active = 1 LIMIT 1`,
+      `SELECT u.id,u.business_id,u.display_name,
+       CASE WHEN ir.user_id IS NOT NULL THEN 'investor' ELSE u.role END AS role,
+       EXISTS(SELECT 1 FROM user_investor_access a WHERE a.user_id=u.id) AS has_investor_access,
+       u.password_hash,u.password_salt
+       FROM users u LEFT JOIN investor_user_roles ir ON ir.user_id=u.id
+       WHERE u.username=? COLLATE NOCASE AND u.is_active=1 LIMIT 1`,
     )
       .bind(input.username)
       .first<Record<string, string>>();
@@ -121,7 +125,8 @@ authRoutes.post(
       id: user.id,
       businessId: user.business_id,
       displayName: user.display_name,
-      role: user.role as "owner" | "manager" | "seller",
+      role: user.role as "owner" | "manager" | "seller" | "investor",
+      hasInvestorAccess: Number(user.has_investor_access ?? 0),
     };
     await createSession(c, sessionUser);
     return c.json({ user: sessionUser });

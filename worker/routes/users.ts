@@ -11,7 +11,7 @@ export const userRoutes = new Hono<{
 const base = z.object({
   username: z.string().trim().min(3).max(40),
   displayName: z.string().trim().min(2).max(80),
-  role: z.enum(["manager", "seller"]),
+  role: z.enum(["manager", "seller", "investor"]),
 });
 const requireOwner = (c: {
   get(name: "sessionUser"): Variables["sessionUser"];
@@ -73,6 +73,22 @@ userRoutes.put(
         c.get("sessionUser").businessId,
         c.req.param("id"),
         c.req.valid("json"),
+      );
+      return c.json({ ok: true });
+    } catch (reason) {
+      return errorResponse(c, reason);
+    }
+  },
+);
+userRoutes.put(
+  "/:id/investor-access",
+  zValidator("json", z.object({ investorId: z.string().min(1).nullable() })),
+  async (c) => {
+    try {
+      await new UserRepository(c.env.DB).setInvestorAccess(
+        c.get("sessionUser").businessId,
+        c.req.param("id"),
+        c.req.valid("json").investorId,
       );
       return c.json({ ok: true });
     } catch (reason) {

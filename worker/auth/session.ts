@@ -94,9 +94,11 @@ async function readSession(
     const absoluteExp = data.absoluteExp ?? issuedAt + ABSOLUTE_MAX_AGE;
     if (data.exp <= now || absoluteExp <= now) return null;
     const user = await c.env.DB.prepare(
-      `SELECT u.id,u.business_id AS businessId,
-        u.display_name AS displayName,u.role
+      `SELECT u.id,u.business_id AS businessId,u.display_name AS displayName,
+        CASE WHEN ir.user_id IS NOT NULL THEN 'investor' ELSE u.role END AS role,
+        EXISTS(SELECT 1 FROM user_investor_access a WHERE a.user_id=u.id) AS hasInvestorAccess
       FROM users u JOIN businesses b ON b.id=u.business_id
+      LEFT JOIN investor_user_roles ir ON ir.user_id=u.id
       WHERE u.id=? AND u.business_id=? AND u.is_active=1 AND b.is_active=1`,
     )
       .bind(data.id, data.businessId)

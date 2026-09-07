@@ -18,25 +18,26 @@ API Hono y solo el POS mantiene una instantánea y una cola offline temporal.
 
 ## Mapa de responsabilidades
 
-| Tabla                            | Responsabilidad                                             |
-| -------------------------------- | ----------------------------------------------------------- |
-| `businesses`                     | Negocio, moneda contable base e impuesto                    |
-| `business_currencies`            | Monedas que el negocio acepta o entrega                     |
-| `money_accounts`                 | Ubicación lógica de saldos nominales por moneda             |
-| `monetary_components`            | Forma real en que una operación recibió o entregó dinero    |
-| `currency_exchanges`             | Cabecera de cambios internos entre moneda base y secundaria |
-| `users`                          | Credenciales, negocio y roles                               |
-| `categories`, `products`         | Identidad y presentación del catálogo                       |
-| `inventory_batches`              | Costo y precios congelados por lote                         |
-| `inventory_batch_stocks`         | Existencia materializada de un lote en cada ubicación       |
-| `inventory_movements`            | Libro auditable de entradas, salidas y transferencias       |
-| `cash_sessions`                  | Cabecera compatible de apertura y cierre de POS             |
-| `cash_session_currency_balances` | Apertura, esperado, contado y diferencia por moneda         |
-| `sales`, `sale_items`            | Cabecera, artículos y precios congelados de una venta       |
-| `sale_refunds`                   | Devolución completa de una venta                            |
-| `suppliers`, `supplier_invoices` | Proveedores y documentos de compra en moneda base           |
-| `financial_movements`            | Clasificación contable de entradas y salidas financieras    |
-| `audit_logs`                     | Auditoría funcional y administrativa                        |
+| Tabla                             | Responsabilidad                                             |
+| --------------------------------- | ----------------------------------------------------------- |
+| `businesses`                      | Negocio, moneda contable base e impuesto                    |
+| `business_currencies`             | Monedas que el negocio acepta o entrega                     |
+| `money_accounts`                  | Ubicación lógica de saldos nominales por moneda             |
+| `monetary_components`             | Forma real en que una operación recibió o entregó dinero    |
+| `currency_exchanges`              | Cabecera de cambios internos entre moneda base y secundaria |
+| `users`                           | Credenciales, negocio y roles                               |
+| `categories`, `products`          | Identidad y presentación del catálogo                       |
+| `inventory_batches`               | Costo y precios congelados por lote                         |
+| `inventory_batch_stocks`          | Existencia materializada de un lote en cada ubicación       |
+| `inventory_movements`             | Libro auditable de entradas, salidas y transferencias       |
+| `cash_sessions`                   | Cabecera compatible de apertura y cierre de POS             |
+| `cash_session_currency_balances`  | Apertura, esperado, contado y diferencia por moneda         |
+| `sales`, `sale_items`             | Cabecera, artículos y precios congelados de una venta       |
+| `sale_refunds`                    | Devolución completa de una venta                            |
+| `suppliers`, `supplier_invoices`  | Proveedores y documentos de compra en moneda base           |
+| `financial_movements`             | Clasificación contable de entradas y salidas financieras    |
+| `audit_logs`                      | Auditoría funcional y administrativa                        |
+| `investors`, `investment_entries` | Aportes, unidades de propiedad y distribuciones             |
 
 `operating_expenses` fue eliminada en la migración `0006`; los gastos viven en
 `financial_movements`. `images` reemplaza el almacenamiento de imágenes de
@@ -173,6 +174,35 @@ Los identificadores de migración son deterministas para evitar duplicados. Los
 campos heredados se mantienen mientras existan lectores antiguos, pero las
 nuevas funciones monetarias deben consultar `monetary_components` y
 `cash_session_currency_balances`.
+
+## Inversores y participaciones
+
+La propiedad se expresa mediante unidades internas, no mediante porcentajes
+editables. El capital inicial crea las primeras unidades sin duplicar una
+entrada en tesorería. Kontia propone ese capital inicial sumando el saldo neto
+de todas las cuentas monetarias en moneda base y el inventario disponible a
+costo; el propietario puede ajustarlo para reconocer pasivos u otros activos
+no registrados. Esa misma valoración se propone automáticamente como valor
+previo en cada aporte posterior, antes de registrar la nueva entrada. Cada
+aporte posterior compra unidades según la valoración
+del negocio inmediatamente anterior al aporte, conservando así la dilución y el
+historial. Las distribuciones se prorratean por las unidades vigentes, no
+alteran la propiedad y crean una única salida financiera enlazada. Un aporte de
+dinero nuevo crea igualmente su entrada financiera enlazada.
+
+Un retiro de capital pertenece a un inversor concreto y cancela unidades al
+valor patrimonial inmediatamente anterior al retiro. Por eso puede modificar
+los porcentajes de todos los inversores. Es una operación distinta de una
+distribución de ganancias, que no altera las unidades.
+
+### Portal del inversor
+
+`user_investor_access` autoriza qué posición puede consultar cada usuario. El
+rol `investor` queda bloqueado en todas las API operativas y solo consume el
+portal de lectura; el identificador del inversor se resuelve en el servidor a
+partir de la sesión. `investment_valuation_snapshots` congela diariamente la
+tesorería, el inventario, el patrimonio estimado y las unidades para alimentar
+la evolución histórica sin recalcular el pasado.
 
 ## Seguridad e integridad
 

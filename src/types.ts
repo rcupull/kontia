@@ -2,7 +2,8 @@ export type SessionUser = {
   id: string;
   businessId: string;
   displayName: string;
-  role: "owner" | "manager" | "seller";
+  role: "owner" | "manager" | "seller" | "investor";
+  hasInvestorAccess?: number;
 };
 
 export type Business = {
@@ -61,7 +62,9 @@ export type BusinessUser = {
   id: string;
   username: string;
   displayName: string;
-  role: "owner" | "manager" | "seller";
+  role: "owner" | "manager" | "seller" | "investor";
+  investorId?: string;
+  investorName?: string;
   isActive: number;
   createdAt: string;
   updatedAt: string;
@@ -247,4 +250,49 @@ export type FinancialMovement = {
   relatedEntityId?: string;
   createdAt: string;
   components?: MonetaryComponent[];
+};
+
+export type Investor = {
+  id: string;
+  name: string;
+  notes?: string;
+  isActive: number;
+  contributedCents: number;
+  withdrawnCapitalCents: number;
+  netContributedCents: number;
+  distributedCents: number;
+  currentPatrimonyCents: number;
+  unitsMicros: number;
+  ownershipBps: number;
+  createdAt: string;
+};
+export type InvestmentEntry = {
+  id: string;
+  batchId: string;
+  investorId: string;
+  investorName: string;
+  entryType:
+    | "openingCapital"
+    | "contribution"
+    | "profitDistribution"
+    | "capitalWithdrawal";
+  amountCents: number;
+  unitsMicros: number;
+  preMoneyValuationCents?: number;
+  affectsCash: number;
+  entryDate: string;
+  notes?: string;
+};
+export type InvestmentSummary = {
+  baseCurrency: string;
+  currentValuation: {
+    treasuryCents: number;
+    inventoryCents: number;
+    totalCents: number;
+  };
+  totalUnitsMicros: number;
+  totalContributedCents: number;
+  totalDistributedCents: number;
+  investors: Investor[];
+  entries: InvestmentEntry[];
 };
