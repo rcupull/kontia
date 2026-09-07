@@ -16,6 +16,7 @@ import type {
   Business,
   MoneySettings,
   MonetaryComponentInput,
+  InvestmentSummary,
 } from "./types";
 
 export type DashboardMetrics = {
@@ -131,6 +132,58 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  investments: () => request<InvestmentSummary>("/api/investments"),
+  createInvestor: (input: { name: string; notes?: string }) =>
+    request<{ id: string }>("/api/investments/investors", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  setInvestorStatus: (id: string, isActive: boolean) =>
+    request<{ ok: boolean }>(`/api/investments/investors/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ isActive }),
+    }),
+  createInvestmentContribution: (input: {
+    investorId: string;
+    amountCents: number;
+    preMoneyValuationCents?: number;
+    entryDate: string;
+    notes?: string;
+    affectsCash: boolean;
+    components?: MonetaryComponentInput[];
+  }) =>
+    request<{ id: string }>("/api/investments/contributions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  createInvestmentDistribution: (input: {
+    amountCents: number;
+    entryDate: string;
+    notes?: string;
+    components: MonetaryComponentInput[];
+  }) =>
+    request<{
+      batchId: string;
+      allocations: Array<{
+        investorId: string;
+        investorName: string;
+        amountCents: number;
+      }>;
+    }>("/api/investments/distributions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  createInvestmentWithdrawal: (input: {
+    investorId: string;
+    amountCents: number;
+    entryDate: string;
+    notes?: string;
+    components: MonetaryComponentInput[];
+  }) =>
+    request<{ id: string; unitsBurned: number; maximumCents: number }>(
+      "/api/investments/withdrawals",
+      { method: "POST", body: JSON.stringify(input) },
+    ),
   setupStatus: () => request<{ required: boolean }>("/api/auth/setup/status"),
   setup: (input: {
     bootstrapSecret: string;

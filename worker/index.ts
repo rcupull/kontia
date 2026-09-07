@@ -13,6 +13,7 @@ import { userRoutes } from "./routes/users";
 import { businessRoutes } from "./routes/businesses";
 import { moneyRoutes } from "./routes/money";
 import { externalRoutes } from "./routes/external";
+import { investmentRoutes } from "./routes/investments";
 import { requireSession } from "./auth/session";
 import { getImage, uploadImage } from "./controllers/imageController";
 import type { Bindings, Variables } from "./types";
@@ -46,6 +47,7 @@ for (const resource of [
   "users",
   "businesses",
   "money",
+  "investments",
 ]) {
   app.use(`/api/${resource}`, requireSession);
   app.use(`/api/${resource}/*`, requireSession);
@@ -63,5 +65,6 @@ app.route("/api/pos", posRoutes);
 app.route("/api/users", userRoutes);
 app.route("/api/businesses", businessRoutes);
 app.route("/api/money", moneyRoutes);
+app.route("/api/investments", investmentRoutes);
 
 export default app;

@@ -24,6 +24,7 @@ import {
   X,
   MapPin,
   ArrowLeftRight,
+  PieChart,
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { api } from "../api";
@@ -43,6 +44,7 @@ const sections = [
   { to: "/admin/cash-sessions", label: "Sesiones de caja", icon: WalletCards },
   { to: "/admin/financial-movements", label: "Finanzas", icon: BarChart3 },
   { to: "/admin/money", label: "Cambios de moneda", icon: ArrowLeftRight },
+  { to: "/admin/investments", label: "Inversiones", icon: PieChart },
   { to: "/admin/users", label: "Usuarios", icon: Users },
   { to: "/admin/businesses", label: "Negocios", icon: Store },
   { to: "/admin/maintenance", label: "Mantenimiento", icon: Wrench },
@@ -79,7 +81,11 @@ export function AdminLayout() {
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
         {sections
-          .filter(({ to }) => to !== "/admin/users" || user?.role === "owner")
+          .filter(
+            ({ to }) =>
+              !["/admin/users", "/admin/investments"].includes(to) ||
+              user?.role === "owner",
+          )
           .map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
