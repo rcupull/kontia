@@ -28,6 +28,21 @@ const financial = z.object({
   notes: z.string().trim().max(500).optional(),
   components: z.array(monetaryComponentSchema).max(12).optional(),
 });
+const automaticallyManagedTypes = new Set([
+  "capitalInjection",
+  "ownerWithdrawal",
+  "sessionClose",
+]);
+const rejectAutomaticallyManagedType = (c: any) =>
+  automaticallyManagedTypes.has(c.req.valid("json").type)
+    ? c.json(
+        {
+          error:
+            "Este movimiento se genera automáticamente desde su operación de origen",
+        },
+        409,
+      )
+    : null;
 adminRoutes.get("/sales", async (c) =>
   c.json({
     sales: await new AdminRepository(c.env.DB).sales(
@@ -53,6 +68,8 @@ adminRoutes.get("/financial", async (c) =>
   }),
 );
 adminRoutes.post("/financial", zValidator("json", financial), async (c) => {
+  const rejected = rejectAutomaticallyManagedType(c);
+  if (rejected) return rejected;
   const u = c.get("sessionUser");
   try {
     return c.json(
@@ -73,6 +90,8 @@ adminRoutes.post("/financial", zValidator("json", financial), async (c) => {
   }
 });
 adminRoutes.put("/financial/:id", zValidator("json", financial), async (c) => {
+  const rejected = rejectAutomaticallyManagedType(c);
+  if (rejected) return rejected;
   const u = c.get("sessionUser");
   try {
     const id = await new AdminRepository(c.env.DB).saveFinancial(

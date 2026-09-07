@@ -195,6 +195,16 @@ valor patrimonial inmediatamente anterior al retiro. Por eso puede modificar
 los porcentajes de todos los inversores. Es una operación distinta de una
 distribución de ganancias, que no altera las unidades.
 
+`capitalInjection` y `ownerWithdrawal` permanecen como clasificaciones del
+libro financiero, pero no pueden crearse manualmente desde Finanzas. Los nuevos
+aportes y retiros nacen exclusivamente en Inversiones para mantener sincronizadas
+las unidades, la participación y los componentes monetarios. Los registros
+manuales históricos continúan siendo visibles y no editables.
+
+`sessionClose` tampoco se crea manualmente desde Finanzas: nace únicamente del
+cierre efectivo de una sesión de caja. Sus registros históricos permanecen
+visibles y protegidos contra su modificación.
+
 ### Portal del inversor
 
 `user_investor_access` autoriza qué posición puede consultar cada usuario. El

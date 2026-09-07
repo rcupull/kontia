@@ -48,14 +48,17 @@ const expenseTypes = [
   ["other", "Otro"],
 ] as const;
 const financialTypes = [
-  ["capitalInjection", "Inyección de capital"],
-  ["sessionClose", "Cierre de caja"],
   ["operatingExpense", "Gasto operativo"],
   ["inventoryReinvestment", "Reinversión en inventario"],
-  ["ownerWithdrawal", "Retiro del propietario"],
   ["saleRefund", "Reintegro de venta"],
   ["positiveAdjustment", "Ajuste positivo"],
   ["negativeAdjustment", "Ajuste negativo"],
+] as const;
+const financialTypeLabels = [
+  ["capitalInjection", "Inyección de capital"],
+  ["ownerWithdrawal", "Retiro del propietario"],
+  ["sessionClose", "Cierre de caja"],
+  ...financialTypes,
 ] as const;
 const label = (
   options: readonly (readonly [string, string])[],
@@ -479,7 +482,7 @@ export function FinancialMovementsPage() {
     setError("");
     setEditing(item);
     methods.reset({
-      type: item?.type ?? "capitalInjection",
+      type: item?.type ?? "operatingExpense",
       expenseType: item?.expenseType ?? "",
       moneyLocation: item?.moneyLocation ?? "cashDeposit",
       amount: (item?.amountCents ?? 0) / 100,
@@ -573,7 +576,7 @@ export function FinancialMovementsPage() {
                   <td className="px-5 py-4">{date(m.movementDate)}</td>
                   <td className="font-black">{m.description}</td>
                   <td>
-                    {label(financialTypes, m.type)}
+                    {label(financialTypeLabels, m.type)}
                     {m.expenseType && (
                       <p className="text-xs text-slate-400">
                         {label(expenseTypes, m.expenseType)}
@@ -593,7 +596,13 @@ export function FinancialMovementsPage() {
                   </td>
                   <td>{m.notes || "—"}</td>
                   <td>
-                    {!m.relatedEntityType && !m.relatedEntityId ? (
+                    {!m.relatedEntityType &&
+                    !m.relatedEntityId &&
+                    ![
+                      "capitalInjection",
+                      "ownerWithdrawal",
+                      "sessionClose",
+                    ].includes(m.type) ? (
                       <button
                         onClick={() => open(m)}
                         className="p-2 text-emerald-700"
