@@ -17,6 +17,8 @@ import type {
   MoneySettings,
   MonetaryComponentInput,
   InvestmentSummary,
+  FixedAsset,
+  ReclassifiableContribution,
 } from "./types";
 
 export type DashboardMetrics = {
@@ -182,6 +184,27 @@ export const api = {
   }) =>
     request<{ id: string; unitsBurned: number; maximumCents: number }>(
       "/api/investments/withdrawals",
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+  fixedAssets: () =>
+    request<{ assets: FixedAsset[] }>("/api/investments/fixed-assets"),
+  reclassifiableContributions: () =>
+    request<{ contributions: ReclassifiableContribution[] }>(
+      "/api/investments/reclassifiable-contributions",
+    ),
+  reclassifyContributionAsFixedAsset: (input: {
+    investmentEntryId?: string;
+    financialMovementId: string;
+    investorId?: string;
+    monetaryComponentId: string;
+    name: string;
+    category: string;
+    description?: string;
+    acquisitionDate: string;
+    valueCents: number;
+  }) =>
+    request<{ id: string; investorId: string }>(
+      "/api/investments/fixed-assets/reclassifications",
       { method: "POST", body: JSON.stringify(input) },
     ),
   setupStatus: () => request<{ required: boolean }>("/api/auth/setup/status"),

@@ -190,7 +190,8 @@ export function InvestmentsPage() {
             .
           </b>{" "}
           Tesorería: {format(data.currentValuation.treasuryCents)} · Inventario
-          al costo: {format(data.currentValuation.inventoryCents)}. Crea
+          al costo: {format(data.currentValuation.inventoryCents)} · Activos
+          fijos netos: {format(data.currentValuation.fixedAssetsCents)}. Crea
           “Fundadores” y abre un aporte; Kontia colocará este total
           automáticamente como capital que ya estaba dentro.
         </div>
@@ -376,9 +377,10 @@ export function InvestmentsPage() {
                       })()}
                     {modal === "contribution" && !data.totalUnitsMicros && (
                       <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">
-                        Este importe suma toda la tesorería registrada y las
-                        existencias actuales valoradas a costo. Puedes ajustarlo
-                        si hay deudas u otros activos todavía no registrados.
+                        Este importe suma toda la tesorería registrada, las
+                        existencias actuales valoradas a costo y los activos
+                        fijos por su valor neto. Puedes ajustarlo si hay deudas
+                        u otros activos todavía no registrados.
                       </p>
                     )}
                     {modal === "contribution" && data.totalUnitsMicros > 0 && (
@@ -397,8 +399,10 @@ export function InvestmentsPage() {
                           {format(data.currentValuation.totalCents)}: tesorería{" "}
                           {format(data.currentValuation.treasuryCents)} +
                           inventario al costo{" "}
-                          {format(data.currentValuation.inventoryCents)}. Puedes
-                          corregirlo si existen deudas u otros activos no
+                          {format(data.currentValuation.inventoryCents)} +
+                          activos fijos netos{" "}
+                          {format(data.currentValuation.fixedAssetsCents)}.
+                          Puedes corregirlo si existen deudas u otros activos no
                           registrados.
                         </p>
                         {projected > 0 && (

@@ -26,6 +26,7 @@ import {
   ArrowLeftRight,
   PieChart,
   TrendingUp,
+  Refrigerator,
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { api } from "../api";
@@ -46,6 +47,7 @@ const sections = [
   { to: "/admin/financial-movements", label: "Finanzas", icon: BarChart3 },
   { to: "/admin/money", label: "Cambios de moneda", icon: ArrowLeftRight },
   { to: "/admin/investments", label: "Inversiones", icon: PieChart },
+  { to: "/admin/fixed-assets", label: "Activos fijos", icon: Refrigerator },
   { to: "/my-investment", label: "Mi inversión", icon: TrendingUp },
   { to: "/admin/users", label: "Usuarios", icon: Users },
   { to: "/admin/businesses", label: "Negocios", icon: Store },

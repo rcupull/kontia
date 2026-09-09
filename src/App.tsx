@@ -17,6 +17,7 @@ import { BusinessesPage } from "./pages/BusinessesPage";
 import { MoneyPage } from "./pages/MoneyPage";
 import { InvestmentsPage } from "./pages/InvestmentsPage";
 import { MyInvestmentPage } from "./pages/MyInvestmentPage";
+import { FixedAssetsPage } from "./pages/FixedAssetsPage";
 import {
   CashSessionsPage,
   FinancialMovementsPage,
@@ -68,6 +69,7 @@ export default function App() {
         />
         <Route path="money" element={<MoneyPage />} />
         <Route path="investments" element={<InvestmentsPage />} />
+        <Route path="fixed-assets" element={<FixedAssetsPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="businesses" element={<BusinessesPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />

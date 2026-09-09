@@ -17,7 +17,7 @@ export class InvestmentRepository {
   constructor(private readonly db: D1Database) {}
 
   async summary(businessId: string) {
-    const [business, investors, entries, treasury, inventory] =
+    const [business, investors, entries, treasury, inventory, fixedAssets] =
       await Promise.all([
         this.db
           .prepare(`SELECT currency FROM businesses WHERE id=?`)
@@ -64,6 +64,13 @@ export class InvestmentRepository {
           )
           .bind(businessId)
           .first<{ value: number }>(),
+        this.db
+          .prepare(
+            `SELECT COALESCE(SUM(original_value_cents-accumulated_depreciation_cents),0) value
+             FROM fixed_assets WHERE business_id=? AND status='active' AND deleted_at IS NULL`,
+          )
+          .bind(businessId)
+          .first<{ value: number }>(),
       ]);
     const normalized = investors.results.map((row) => ({
       id: String(row.id),
@@ -85,8 +92,11 @@ export class InvestmentRepository {
       currentValuation: {
         treasuryCents: Number(treasury?.value ?? 0),
         inventoryCents: Number(inventory?.value ?? 0),
+        fixedAssetsCents: Number(fixedAssets?.value ?? 0),
         totalCents:
-          Number(treasury?.value ?? 0) + Number(inventory?.value ?? 0),
+          Number(treasury?.value ?? 0) +
+          Number(inventory?.value ?? 0) +
+          Number(fixedAssets?.value ?? 0),
       },
       totalUnitsMicros,
       totalContributedCents: normalized.reduce(
@@ -107,7 +117,8 @@ export class InvestmentRepository {
                   Math.max(
                     0,
                     Number(treasury?.value ?? 0) +
-                      Number(inventory?.value ?? 0),
+                      Number(inventory?.value ?? 0) +
+                      Number(fixedAssets?.value ?? 0),
                   ),
                 ) *
                   BigInt(row.unitsMicros)) /
@@ -121,6 +132,199 @@ export class InvestmentRepository {
       })),
       entries: entries.results,
     };
+  }
+
+  async fixedAssets(businessId: string) {
+    return (
+      await this.db
+        .prepare(
+          `SELECT a.id,a.name,a.category,a.description,a.acquisition_date AS acquisitionDate,
+           a.original_value_cents AS originalValueCents,
+           a.accumulated_depreciation_cents AS accumulatedDepreciationCents,
+           a.acquisition_type AS acquisitionType,a.status,i.id AS investorId,i.name AS investorName
+           FROM fixed_assets a LEFT JOIN investors i ON i.id=a.investor_id
+           WHERE a.business_id=? AND a.deleted_at IS NULL
+           ORDER BY a.acquisition_date DESC,a.created_at DESC`,
+        )
+        .bind(businessId)
+        .all()
+    ).results;
+  }
+
+  async reclassifiableContributions(businessId: string) {
+    return (
+      await this.db
+        .prepare(
+          `SELECT e.id AS entryId,fm.id AS financialMovementId,e.entry_date AS entryDate,
+           i.id AS investorId,i.name AS investorName,
+           mc.id AS componentId,mc.currency_code AS currencyCode,mc.amount_minor AS amountMinor,
+           mc.base_amount_cents AS baseAmountCents,mc.exchange_rate_scaled AS exchangeRateScaled,
+           ma.name AS accountName
+           FROM investment_entries e JOIN investors i ON i.id=e.investor_id
+           JOIN financial_movements fm ON fm.id=e.financial_movement_id
+           JOIN monetary_components mc ON mc.business_id=e.business_id
+             AND mc.operation_type='financialMovement'
+             AND mc.operation_id=e.financial_movement_id AND mc.flow='inflow'
+           JOIN money_accounts ma ON ma.id=mc.money_account_id
+           WHERE e.business_id=? AND e.entry_type='contribution'
+           UNION ALL
+           SELECT NULL AS entryId,fm.id AS financialMovementId,fm.movement_date AS entryDate,
+           NULL AS investorId,NULL AS investorName,mc.id AS componentId,
+           mc.currency_code AS currencyCode,mc.amount_minor AS amountMinor,
+           mc.base_amount_cents AS baseAmountCents,mc.exchange_rate_scaled AS exchangeRateScaled,
+           ma.name AS accountName
+           FROM financial_movements fm JOIN monetary_components mc
+             ON mc.business_id=fm.business_id AND mc.operation_type='financialMovement'
+             AND mc.operation_id=fm.id AND mc.flow='inflow'
+           JOIN money_accounts ma ON ma.id=mc.money_account_id
+           WHERE fm.business_id=? AND fm.type='capitalInjection'
+             AND fm.related_entity_type IS NULL
+           ORDER BY entryDate DESC`,
+        )
+        .bind(businessId, businessId)
+        .all()
+    ).results;
+  }
+
+  async reclassifyFixedAsset(
+    businessId: string,
+    userId: string,
+    input: {
+      investmentEntryId?: string;
+      financialMovementId: string;
+      investorId?: string;
+      monetaryComponentId: string;
+      name: string;
+      category: string;
+      description?: string;
+      acquisitionDate: string;
+      valueCents: number;
+    },
+  ) {
+    const source = await this.db
+      .prepare(
+        `SELECT e.id AS investmentEntryId,e.investor_id AS investorId,fm.id AS financialMovementId,
+         mc.amount_minor AS amountMinor,mc.base_amount_cents AS baseAmountCents,
+         mc.currency_code AS currencyCode
+         FROM financial_movements fm JOIN monetary_components mc
+           ON mc.business_id=fm.business_id AND mc.operation_type='financialMovement'
+           AND mc.operation_id=fm.id AND mc.flow='inflow'
+         LEFT JOIN investment_entries e ON e.business_id=fm.business_id
+           AND e.financial_movement_id=fm.id AND e.entry_type='contribution'
+         WHERE fm.id=? AND fm.business_id=? AND fm.type='capitalInjection' AND mc.id=?
+           AND (? IS NULL OR e.id=?)`,
+      )
+      .bind(
+        input.financialMovementId,
+        businessId,
+        input.monetaryComponentId,
+        input.investmentEntryId ?? null,
+        input.investmentEntryId ?? null,
+      )
+      .first<{
+        investmentEntryId: string | null;
+        investorId: string | null;
+        financialMovementId: string;
+        amountMinor: number;
+        baseAmountCents: number;
+        currencyCode: string;
+      }>();
+    if (!source) throw new Error("RECLASSIFICATION_SOURCE_NOT_FOUND");
+    const investorId = source.investorId ?? input.investorId;
+    if (!investorId) throw new Error("RECLASSIFICATION_INVESTOR_REQUIRED");
+    const investor = await this.db
+      .prepare(`SELECT id FROM investors WHERE id=? AND business_id=?`)
+      .bind(investorId, businessId)
+      .first();
+    if (!investor) throw new Error("INVESTOR_NOT_FOUND");
+    if (input.valueCents > source.baseAmountCents)
+      throw new Error("RECLASSIFICATION_EXCEEDS_COMPONENT");
+    const nominalAmountMinor =
+      input.valueCents === source.baseAmountCents
+        ? source.amountMinor
+        : Math.round(
+            (input.valueCents * source.amountMinor) / source.baseAmountCents,
+          );
+    if (
+      nominalAmountMinor <= 0 ||
+      (input.valueCents < source.baseAmountCents &&
+        nominalAmountMinor >= source.amountMinor)
+    )
+      throw new Error("INVALID_RECLASSIFICATION_ROUNDING");
+    const assetId = crypto.randomUUID();
+    const reclassificationId = crypto.randomUUID();
+    const componentStatement =
+      input.valueCents === source.baseAmountCents
+        ? this.db
+            .prepare(
+              `DELETE FROM monetary_components WHERE id=? AND business_id=?`,
+            )
+            .bind(input.monetaryComponentId, businessId)
+        : this.db
+            .prepare(
+              `UPDATE monetary_components SET amount_minor=amount_minor-?,base_amount_cents=base_amount_cents-?
+               WHERE id=? AND business_id=?`,
+            )
+            .bind(
+              nominalAmountMinor,
+              input.valueCents,
+              input.monetaryComponentId,
+              businessId,
+            );
+    await this.db.batch([
+      componentStatement,
+      this.db
+        .prepare(
+          `UPDATE financial_movements SET amount_cents=amount_cents-?,
+           notes=trim(COALESCE(notes,'') || ' · Reclasificación a activo fijo: ' || ?),
+           updated_at=datetime('now') WHERE id=? AND business_id=? AND amount_cents>=?`,
+        )
+        .bind(
+          input.valueCents,
+          input.name,
+          source.financialMovementId,
+          businessId,
+          input.valueCents,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO fixed_assets
+           (id,business_id,investor_id,name,category,description,acquisition_date,
+            original_value_cents,acquisition_type,created_by_user_id)
+           VALUES (?,?,?,?,?,NULLIF(?,''),?,?,'inKindContribution',?)`,
+        )
+        .bind(
+          assetId,
+          businessId,
+          investorId,
+          input.name,
+          input.category,
+          input.description ?? "",
+          input.acquisitionDate,
+          input.valueCents,
+          userId,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO fixed_asset_reclassifications
+           (id,business_id,fixed_asset_id,investment_entry_id,financial_movement_id,monetary_component_id,
+            base_amount_cents,nominal_amount_minor,currency_code,created_by_user_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        )
+        .bind(
+          reclassificationId,
+          businessId,
+          assetId,
+          source.investmentEntryId,
+          source.financialMovementId,
+          input.monetaryComponentId,
+          input.valueCents,
+          nominalAmountMinor,
+          source.currencyCode,
+          userId,
+        ),
+    ]);
+    return { id: assetId, investorId };
   }
 
   async createInvestor(

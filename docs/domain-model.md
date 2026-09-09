@@ -180,9 +180,10 @@ nuevas funciones monetarias deben consultar `monetary_components` y
 La propiedad se expresa mediante unidades internas, no mediante porcentajes
 editables. El capital inicial crea las primeras unidades sin duplicar una
 entrada en tesorería. Kontia propone ese capital inicial sumando el saldo neto
-de todas las cuentas monetarias en moneda base y el inventario disponible a
-costo; el propietario puede ajustarlo para reconocer pasivos u otros activos
-no registrados. Esa misma valoración se propone automáticamente como valor
+de todas las cuentas monetarias en moneda base, el inventario disponible a
+costo y los activos fijos por su valor neto; el propietario puede ajustarlo
+para reconocer pasivos u otros activos no registrados. Esa misma valoración se
+propone automáticamente como valor
 previo en cada aporte posterior, antes de registrar la nueva entrada. Cada
 aporte posterior compra unidades según la valoración
 del negocio inmediatamente anterior al aporte, conservando así la dilución y el
@@ -201,6 +202,21 @@ aportes y retiros nacen exclusivamente en Inversiones para mantener sincronizada
 las unidades, la participación y los componentes monetarios. Los registros
 manuales históricos continúan siendo visibles y no editables.
 
+### Activos fijos y reclasificación
+
+`fixed_assets` registra equipos y otros bienes duraderos por su costo original,
+depreciación acumulada y valor neto. Un activo aportado por un inversor conserva
+su atribución mediante `investor_id`, pero forma parte del patrimonio común y no
+crea nuevas unidades si el aporte ya había sido reconocido.
+
+La reclasificación convierte en especie una parte o la totalidad de un aporte
+monetario existente: reduce el componente monetario y el movimiento financiero
+por el mismo valor que incorpora al activo fijo. Así corrige la caja sin cambiar
+el patrimonio total, las unidades ni los porcentajes. La tabla
+`fixed_asset_reclassifications` conserva el enlace auditable con la operación de
+origen. También admite inyecciones manuales históricas; en ese caso el
+administrador debe indicar a qué inversor corresponde el activo.
+
 `sessionClose` tampoco se crea manualmente desde Finanzas: nace únicamente del
 cierre efectivo de una sesión de caja. Sus registros históricos permanecen
 visibles y protegidos contra su modificación.
@@ -211,8 +227,8 @@ visibles y protegidos contra su modificación.
 rol `investor` queda bloqueado en todas las API operativas y solo consume el
 portal de lectura; el identificador del inversor se resuelve en el servidor a
 partir de la sesión. `investment_valuation_snapshots` congela diariamente la
-tesorería, el inventario, el patrimonio estimado y las unidades para alimentar
-la evolución histórica sin recalcular el pasado.
+tesorería, el inventario, los activos fijos netos, el patrimonio estimado y las
+unidades para alimentar la evolución histórica sin recalcular el pasado.
 
 ## Seguridad e integridad
 
