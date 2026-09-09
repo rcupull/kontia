@@ -100,7 +100,8 @@ export function MyInvestmentPage() {
           </p>
           <h1 className="mt-1 text-3xl font-black">{data.investor.name}</h1>
           <p className="mt-2 text-slate-500">
-            Valor estimado a partir de la tesorería y el inventario al costo.
+            Valor estimado a partir de la tesorería, el inventario al costo y
+            los activos fijos netos.
           </p>
         </div>
         <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

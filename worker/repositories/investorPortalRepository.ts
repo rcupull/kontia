@@ -11,9 +11,10 @@ export class InvestorPortalRepository {
     await this.db
       .prepare(
         `INSERT INTO investment_valuation_snapshots
-         (business_id,snapshot_date,treasury_cents,inventory_cents,total_equity_cents,total_units_micros)
-         VALUES (?,?,?,?,?,?) ON CONFLICT(business_id,snapshot_date) DO UPDATE SET
+         (business_id,snapshot_date,treasury_cents,inventory_cents,fixed_assets_cents,total_equity_cents,total_units_micros)
+         VALUES (?,?,?,?,?,?,?) ON CONFLICT(business_id,snapshot_date) DO UPDATE SET
          treasury_cents=excluded.treasury_cents,inventory_cents=excluded.inventory_cents,
+         fixed_assets_cents=excluded.fixed_assets_cents,
          total_equity_cents=excluded.total_equity_cents,total_units_micros=excluded.total_units_micros,
          updated_at=datetime('now')`,
       )
@@ -22,6 +23,7 @@ export class InvestorPortalRepository {
         date,
         summary.currentValuation.treasuryCents,
         summary.currentValuation.inventoryCents,
+        summary.currentValuation.fixedAssetsCents,
         summary.currentValuation.totalCents,
         summary.totalUnitsMicros,
       )

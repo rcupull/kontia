@@ -28,6 +28,14 @@ const errors: Record<string, string> = {
     "El patrimonio actual debe ser positivo para retirar capital",
   WITHDRAWAL_EXCEEDS_POSITION:
     "El retiro supera el valor patrimonial del inversor",
+  RECLASSIFICATION_SOURCE_NOT_FOUND:
+    "El aporte o componente monetario ya no está disponible",
+  RECLASSIFICATION_EXCEEDS_COMPONENT:
+    "El activo supera el saldo monetario del componente seleccionado",
+  INVALID_RECLASSIFICATION_ROUNDING:
+    "El valor es demasiado pequeño para reclasificarlo en esa moneda",
+  RECLASSIFICATION_INVESTOR_REQUIRED:
+    "Selecciona el inversor al que pertenece el activo",
 };
 const handle = (error: unknown) =>
   moneyError(error) ??
@@ -147,6 +155,54 @@ investmentRoutes.post(
     try {
       return c.json(
         await new InvestmentRepository(c.env.DB).withdrawCapital(
+          u.businessId,
+          u.id,
+          c.req.valid("json"),
+        ),
+        201,
+      );
+    } catch (error) {
+      const message = handle(error);
+      if (message) return c.json({ error: message }, 409);
+      throw error;
+    }
+  },
+);
+investmentRoutes.get("/fixed-assets", async (c) =>
+  c.json({
+    assets: await new InvestmentRepository(c.env.DB).fixedAssets(
+      c.get("sessionUser").businessId,
+    ),
+  }),
+);
+investmentRoutes.get("/reclassifiable-contributions", async (c) =>
+  c.json({
+    contributions: await new InvestmentRepository(
+      c.env.DB,
+    ).reclassifiableContributions(c.get("sessionUser").businessId),
+  }),
+);
+investmentRoutes.post(
+  "/fixed-assets/reclassifications",
+  zValidator(
+    "json",
+    z.object({
+      investmentEntryId: z.string().min(1).optional(),
+      financialMovementId: z.string().min(1),
+      investorId: z.string().min(1).optional(),
+      monetaryComponentId: z.string().min(1),
+      name: z.string().trim().min(1).max(150),
+      category: z.string().trim().min(1).max(80),
+      description: z.string().trim().max(500).optional(),
+      acquisitionDate: z.string().min(1),
+      valueCents: z.number().int().positive(),
+    }),
+  ),
+  async (c) => {
+    const u = c.get("sessionUser");
+    try {
+      return c.json(
+        await new InvestmentRepository(c.env.DB).reclassifyFixedAsset(
           u.businessId,
           u.id,
           c.req.valid("json"),

@@ -288,6 +288,7 @@ export type InvestmentSummary = {
   currentValuation: {
     treasuryCents: number;
     inventoryCents: number;
+    fixedAssetsCents: number;
     totalCents: number;
   };
   totalUnitsMicros: number;
@@ -295,4 +296,30 @@ export type InvestmentSummary = {
   totalDistributedCents: number;
   investors: Investor[];
   entries: InvestmentEntry[];
+};
+export type FixedAsset = {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  acquisitionDate: string;
+  originalValueCents: number;
+  accumulatedDepreciationCents: number;
+  acquisitionType: "purchase" | "inKindContribution";
+  status: "active" | "disposed";
+  investorId?: string;
+  investorName?: string;
+};
+export type ReclassifiableContribution = {
+  entryId?: string;
+  financialMovementId: string;
+  entryDate: string;
+  investorId?: string;
+  investorName?: string;
+  componentId: string;
+  currencyCode: string;
+  amountMinor: number;
+  baseAmountCents: number;
+  exchangeRateScaled: number;
+  accountName: string;
 };
