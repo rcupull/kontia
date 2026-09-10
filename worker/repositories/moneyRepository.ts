@@ -162,8 +162,9 @@ export class MoneyRepository {
     components: MonetaryComponentInput[],
     createdAt: string,
     cashSessionId?: string | null,
+    componentIds?: string[],
   ) {
-    return components.map((row) =>
+    return components.map((row, index) =>
       this.db
         .prepare(
           `INSERT INTO monetary_components
@@ -173,7 +174,7 @@ export class MoneyRepository {
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .bind(
-          crypto.randomUUID(),
+          componentIds?.[index] ?? crypto.randomUUID(),
           businessId,
           operationType,
           operationId,

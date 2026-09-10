@@ -196,6 +196,14 @@ valor patrimonial inmediatamente anterior al retiro. Por eso puede modificar
 los porcentajes de todos los inversores. Es una operación distinta de una
 distribución de ganancias, que no altera las unidades.
 
+Una corrección por deuda previa paga una factura de proveedor desde la
+tesorería, pero atribuye la reducción patrimonial únicamente al inversor cuyo
+aporte inicial omitió esa obligación. Cancela unidades al precio histórico del
+aporte seleccionado, no al valor corriente del negocio, y queda enlazada tanto
+con la factura como con cada componente monetario del pago. No se presenta como
+un retiro entregado al inversor ni afecta directamente las unidades de los
+demás participantes.
+
 `capitalInjection` y `ownerWithdrawal` permanecen como clasificaciones del
 libro financiero, pero no pueden crearse manualmente desde Finanzas. Los nuevos
 aportes y retiros nacen exclusivamente en Inversiones para mantener sincronizadas

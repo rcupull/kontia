@@ -79,28 +79,32 @@ export class InvestorPortalRepository {
         .all(),
       this.db
         .prepare(
-          `SELECT id,entry_type AS entryType,amount_cents AS amountCents,
-           entry_date AS entryDate,notes FROM investment_entries
-           WHERE business_id=? AND investor_id=? ORDER BY entry_date DESC LIMIT 100`,
+          `SELECT e.id,
+           CASE WHEN EXISTS (SELECT 1 FROM investment_prior_liability_corrections c
+             WHERE c.correction_investment_entry_id=e.id)
+             THEN 'priorLiabilityCorrection' ELSE e.entry_type END AS entryType,
+           e.amount_cents AS amountCents,e.entry_date AS entryDate,e.notes
+           FROM investment_entries e WHERE e.business_id=? AND e.investor_id=?
+           ORDER BY e.entry_date DESC LIMIT 100`,
         )
         .bind(businessId, link.id)
         .all(),
     ]);
     const totalReturned =
       investor.distributedCents + investor.withdrawnCapitalCents;
+    const adjustedContributedCents =
+      investor.contributedCents - investor.correctedCapitalCents;
     const accumulatedReturnCents =
-      investor.currentPatrimonyCents +
-      totalReturned -
-      investor.contributedCents;
+      investor.currentPatrimonyCents + totalReturned - adjustedContributedCents;
     return {
       baseCurrency: summary.baseCurrency,
       investor: {
         ...investor,
         accumulatedReturnCents,
         returnBps:
-          investor.contributedCents > 0
+          adjustedContributedCents > 0
             ? Math.round(
-                (accumulatedReturnCents * 10000) / investor.contributedCents,
+                (accumulatedReturnCents * 10000) / adjustedContributedCents,
               )
             : 0,
       },

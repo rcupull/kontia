@@ -259,6 +259,7 @@ export type Investor = {
   isActive: number;
   contributedCents: number;
   withdrawnCapitalCents: number;
+  correctedCapitalCents: number;
   netContributedCents: number;
   distributedCents: number;
   currentPatrimonyCents: number;
@@ -275,7 +276,8 @@ export type InvestmentEntry = {
     | "openingCapital"
     | "contribution"
     | "profitDistribution"
-    | "capitalWithdrawal";
+    | "capitalWithdrawal"
+    | "priorLiabilityCorrection";
   amountCents: number;
   unitsMicros: number;
   preMoneyValuationCents?: number;
@@ -296,6 +298,16 @@ export type InvestmentSummary = {
   totalDistributedCents: number;
   investors: Investor[];
   entries: InvestmentEntry[];
+};
+export type PriorLiabilitySource = {
+  id: string;
+  investorId: string;
+  investorName: string;
+  entryType: "openingCapital" | "contribution";
+  entryDate: string;
+  originalAmountCents: number;
+  originalUnitsMicros: number;
+  remainingAmountCents: number;
 };
 export type FixedAsset = {
   id: string;

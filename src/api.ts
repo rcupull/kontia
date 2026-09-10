@@ -18,6 +18,7 @@ import type {
   MonetaryComponentInput,
   InvestmentSummary,
   FixedAsset,
+  PriorLiabilitySource,
   ReclassifiableContribution,
 } from "./types";
 
@@ -205,6 +206,23 @@ export const api = {
   }) =>
     request<{ id: string; investorId: string }>(
       "/api/investments/fixed-assets/reclassifications",
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+  priorLiabilitySources: () =>
+    request<{ sources: PriorLiabilitySource[] }>(
+      "/api/investments/prior-liability-sources",
+    ),
+  correctPriorLiability: (input: {
+    investorId: string;
+    sourceInvestmentEntryId: string;
+    supplierInvoiceId: string;
+    amountCents: number;
+    correctionDate: string;
+    notes?: string;
+    components: MonetaryComponentInput[];
+  }) =>
+    request<{ id: string; unitsBurned: number }>(
+      "/api/investments/prior-liability-corrections",
       { method: "POST", body: JSON.stringify(input) },
     ),
   setupStatus: () => request<{ required: boolean }>("/api/auth/setup/status"),

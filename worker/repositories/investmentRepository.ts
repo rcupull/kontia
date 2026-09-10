@@ -27,7 +27,12 @@ export class InvestmentRepository {
           .prepare(
             `SELECT i.id,i.name,i.notes,i.is_active AS isActive,i.created_at AS createdAt,
            COALESCE(SUM(CASE WHEN e.entry_type IN ('openingCapital','contribution') THEN e.amount_cents ELSE 0 END),0) AS contributedCents,
-           COALESCE(SUM(CASE WHEN e.entry_type='capitalWithdrawal' THEN e.amount_cents ELSE 0 END),0) AS withdrawnCapitalCents,
+           COALESCE(SUM(CASE WHEN e.entry_type='capitalWithdrawal' AND NOT EXISTS
+             (SELECT 1 FROM investment_prior_liability_corrections c
+              WHERE c.correction_investment_entry_id=e.id) THEN e.amount_cents ELSE 0 END),0) AS withdrawnCapitalCents,
+           COALESCE(SUM(CASE WHEN e.entry_type='capitalWithdrawal' AND EXISTS
+             (SELECT 1 FROM investment_prior_liability_corrections c
+              WHERE c.correction_investment_entry_id=e.id) THEN e.amount_cents ELSE 0 END),0) AS correctedCapitalCents,
            COALESCE(SUM(CASE WHEN e.entry_type='profitDistribution' THEN e.amount_cents ELSE 0 END),0) AS distributedCents,
            COALESCE(SUM(e.units_micros),0) AS unitsMicros
            FROM investors i LEFT JOIN investment_entries e
@@ -38,7 +43,10 @@ export class InvestmentRepository {
           .all<Record<string, unknown>>(),
         this.db
           .prepare(
-            `SELECT e.id,e.batch_id AS batchId,e.entry_type AS entryType,
+            `SELECT e.id,e.batch_id AS batchId,
+           CASE WHEN EXISTS (SELECT 1 FROM investment_prior_liability_corrections c
+             WHERE c.correction_investment_entry_id=e.id)
+             THEN 'priorLiabilityCorrection' ELSE e.entry_type END AS entryType,
            e.amount_cents AS amountCents,e.units_micros AS unitsMicros,
            e.pre_money_valuation_cents AS preMoneyValuationCents,
            e.affects_cash AS affectsCash,e.entry_date AS entryDate,e.notes,
@@ -80,6 +88,7 @@ export class InvestmentRepository {
       createdAt: String(row.createdAt),
       contributedCents: Number(row.contributedCents ?? 0),
       withdrawnCapitalCents: Number(row.withdrawnCapitalCents ?? 0),
+      correctedCapitalCents: Number(row.correctedCapitalCents ?? 0),
       distributedCents: Number(row.distributedCents ?? 0),
       unitsMicros: Number(row.unitsMicros ?? 0),
     }));
@@ -109,7 +118,10 @@ export class InvestmentRepository {
       ),
       investors: normalized.map((row) => ({
         ...row,
-        netContributedCents: row.contributedCents - row.withdrawnCapitalCents,
+        netContributedCents:
+          row.contributedCents -
+          row.withdrawnCapitalCents -
+          row.correctedCapitalCents,
         currentPatrimonyCents:
           totalUnitsMicros > 0
             ? Number(
@@ -184,6 +196,194 @@ export class InvestmentRepository {
         .bind(businessId, businessId)
         .all()
     ).results;
+  }
+
+  async priorLiabilitySources(businessId: string) {
+    return (
+      await this.db
+        .prepare(
+          `SELECT e.id,e.investor_id AS investorId,i.name AS investorName,
+           e.entry_type AS entryType,e.entry_date AS entryDate,
+           e.amount_cents AS originalAmountCents,e.units_micros AS originalUnitsMicros,
+           e.amount_cents-COALESCE((SELECT SUM(c.amount_cents)
+             FROM investment_prior_liability_corrections c
+             WHERE c.business_id=e.business_id AND c.source_investment_entry_id=e.id),0)
+             AS remainingAmountCents
+           FROM investment_entries e JOIN investors i ON i.id=e.investor_id
+           WHERE e.business_id=? AND e.entry_type IN ('openingCapital','contribution')
+           ORDER BY e.entry_date,e.created_at`,
+        )
+        .bind(businessId)
+        .all()
+    ).results.filter((row) => Number(row.remainingAmountCents) > 0);
+  }
+
+  async correctPriorLiability(
+    businessId: string,
+    userId: string,
+    input: {
+      investorId: string;
+      sourceInvestmentEntryId: string;
+      supplierInvoiceId: string;
+      amountCents: number;
+      correctionDate: string;
+      notes?: string;
+      components: MonetaryComponentInput[];
+    },
+  ) {
+    const source = await this.db
+      .prepare(
+        `SELECT e.amount_cents AS originalAmountCents,e.units_micros AS originalUnitsMicros,
+         COALESCE((SELECT SUM(c.amount_cents) FROM investment_prior_liability_corrections c
+           WHERE c.business_id=e.business_id AND c.source_investment_entry_id=e.id),0)
+           AS correctedAmountCents,
+         COALESCE((SELECT SUM(c.units_burned_micros) FROM investment_prior_liability_corrections c
+           WHERE c.business_id=e.business_id AND c.source_investment_entry_id=e.id),0)
+           AS correctedUnitsMicros,
+         COALESCE((SELECT SUM(x.units_micros) FROM investment_entries x
+           WHERE x.business_id=e.business_id AND x.investor_id=e.investor_id),0)
+           AS currentInvestorUnits
+         FROM investment_entries e
+         WHERE e.id=? AND e.business_id=? AND e.investor_id=?
+           AND e.entry_type IN ('openingCapital','contribution')`,
+      )
+      .bind(input.sourceInvestmentEntryId, businessId, input.investorId)
+      .first<{
+        originalAmountCents: number;
+        originalUnitsMicros: number;
+        correctedAmountCents: number;
+        correctedUnitsMicros: number;
+        currentInvestorUnits: number;
+      }>();
+    if (!source) throw new Error("LIABILITY_SOURCE_NOT_FOUND");
+    const remainingAmount =
+      Number(source.originalAmountCents) - Number(source.correctedAmountCents);
+    if (input.amountCents > remainingAmount)
+      throw new Error("LIABILITY_CORRECTION_EXCEEDS_SOURCE");
+
+    const invoice = await this.db
+      .prepare(
+        `SELECT i.total_amount_cents AS totalAmountCents,
+         COALESCE((SELECT SUM(mc.base_amount_cents) FROM monetary_components mc
+           WHERE mc.business_id=i.business_id AND mc.operation_type='supplierInvoice'
+             AND mc.operation_id=i.id AND mc.flow='outflow'),0) AS paidAmountCents
+         FROM supplier_invoices i WHERE i.id=? AND i.business_id=? AND i.deleted_at IS NULL`,
+      )
+      .bind(input.supplierInvoiceId, businessId)
+      .first<{ totalAmountCents: number; paidAmountCents: number }>();
+    if (!invoice) throw new Error("INVOICE_NOT_FOUND");
+    if (
+      input.amountCents >
+      Number(invoice.totalAmountCents) - Number(invoice.paidAmountCents)
+    )
+      throw new Error("PAYMENT_EXCEEDS_BALANCE");
+
+    const correctedAfter =
+      Number(source.correctedAmountCents) + input.amountCents;
+    const targetCorrectedUnits =
+      correctedAfter === Number(source.originalAmountCents)
+        ? Number(source.originalUnitsMicros)
+        : Number(
+            (BigInt(correctedAfter) * BigInt(source.originalUnitsMicros) +
+              BigInt(source.originalAmountCents) -
+              1n) /
+              BigInt(source.originalAmountCents),
+          );
+    const unitsToBurn =
+      targetCorrectedUnits - Number(source.correctedUnitsMicros);
+    if (
+      !Number.isSafeInteger(unitsToBurn) ||
+      unitsToBurn <= 0 ||
+      unitsToBurn > Number(source.currentInvestorUnits)
+    )
+      throw new Error("LIABILITY_CORRECTION_EXCEEDS_POSITION");
+
+    const money = new MoneyRepository(this.db);
+    await money.validateComponents(
+      businessId,
+      input.components,
+      input.amountCents,
+    );
+    const requestedByAccount = new Map<string, number>();
+    for (const component of input.components)
+      requestedByAccount.set(
+        component.moneyAccountId,
+        (requestedByAccount.get(component.moneyAccountId) ?? 0) +
+          component.amountMinor,
+      );
+    for (const [accountId, requestedMinor] of requestedByAccount) {
+      const balance = await this.db
+        .prepare(
+          `SELECT COALESCE(SUM(CASE WHEN flow='inflow' THEN amount_minor ELSE -amount_minor END),0) amount
+           FROM monetary_components WHERE business_id=? AND money_account_id=?`,
+        )
+        .bind(businessId, accountId)
+        .first<{ amount: number }>();
+      if (Number(balance?.amount ?? 0) < requestedMinor)
+        throw new Error("INSUFFICIENT_CURRENCY_BALANCE");
+    }
+
+    const correctionId = crypto.randomUUID();
+    const entryId = crypto.randomUUID();
+    const componentIds = input.components.map(() => crypto.randomUUID());
+    await this.db.batch([
+      ...money.componentStatements(
+        businessId,
+        userId,
+        "supplierInvoice",
+        input.supplierInvoiceId,
+        "outflow",
+        input.components,
+        input.correctionDate,
+        null,
+        componentIds,
+      ),
+      this.db
+        .prepare(
+          `INSERT INTO investment_entries
+           (id,business_id,investor_id,batch_id,entry_type,amount_cents,units_micros,
+            affects_cash,financial_movement_id,entry_date,notes,created_by_user_id)
+           VALUES (?,?,?,?, 'capitalWithdrawal',?,?,1,NULL,?,?,?)`,
+        )
+        .bind(
+          entryId,
+          businessId,
+          input.investorId,
+          correctionId,
+          input.amountCents,
+          -unitsToBurn,
+          input.correctionDate,
+          input.notes ?? null,
+          userId,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO investment_prior_liability_corrections
+           (id,business_id,investor_id,source_investment_entry_id,
+            correction_investment_entry_id,supplier_invoice_id,amount_cents,
+            units_burned_micros,created_by_user_id) VALUES (?,?,?,?,?,?,?,?,?)`,
+        )
+        .bind(
+          correctionId,
+          businessId,
+          input.investorId,
+          input.sourceInvestmentEntryId,
+          entryId,
+          input.supplierInvoiceId,
+          input.amountCents,
+          unitsToBurn,
+          userId,
+        ),
+      ...componentIds.map((componentId) =>
+        this.db
+          .prepare(
+            `INSERT INTO investment_prior_liability_payment_components
+             (correction_id,monetary_component_id) VALUES (?,?)`,
+          )
+          .bind(correctionId, componentId),
+      ),
+    ]);
+    return { id: entryId, unitsBurned: unitsToBurn };
   }
 
   async reclassifyFixedAsset(

@@ -49,6 +49,7 @@ export function MyInvestmentPage() {
     contribution: "Aporte",
     profitDistribution: "Ganancia distribuida",
     capitalWithdrawal: "Retiro de capital",
+    priorLiabilityCorrection: "Corrección de deuda previa",
   };
   const cards = [
     ["Patrimonio atribuible", money(data.investor.currentPatrimonyCents)],

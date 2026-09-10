@@ -36,6 +36,13 @@ const errors: Record<string, string> = {
     "El valor es demasiado pequeño para reclasificarlo en esa moneda",
   RECLASSIFICATION_INVESTOR_REQUIRED:
     "Selecciona el inversor al que pertenece el activo",
+  LIABILITY_SOURCE_NOT_FOUND: "El aporte original no está disponible",
+  LIABILITY_CORRECTION_EXCEEDS_SOURCE:
+    "La corrección supera el importe disponible del aporte original",
+  LIABILITY_CORRECTION_EXCEEDS_POSITION:
+    "El inversor ya no tiene suficientes unidades para esta corrección",
+  INVOICE_NOT_FOUND: "La factura no existe",
+  PAYMENT_EXCEEDS_BALANCE: "El pago excede el saldo pendiente de la factura",
 };
 const handle = (error: unknown) =>
   moneyError(error) ??
@@ -203,6 +210,45 @@ investmentRoutes.post(
     try {
       return c.json(
         await new InvestmentRepository(c.env.DB).reclassifyFixedAsset(
+          u.businessId,
+          u.id,
+          c.req.valid("json"),
+        ),
+        201,
+      );
+    } catch (error) {
+      const message = handle(error);
+      if (message) return c.json({ error: message }, 409);
+      throw error;
+    }
+  },
+);
+investmentRoutes.get("/prior-liability-sources", async (c) =>
+  c.json({
+    sources: await new InvestmentRepository(c.env.DB).priorLiabilitySources(
+      c.get("sessionUser").businessId,
+    ),
+  }),
+);
+investmentRoutes.post(
+  "/prior-liability-corrections",
+  zValidator(
+    "json",
+    z.object({
+      investorId: z.string().min(1),
+      sourceInvestmentEntryId: z.string().min(1),
+      supplierInvoiceId: z.string().min(1),
+      amountCents: z.number().int().positive(),
+      correctionDate: z.string().datetime({ offset: true }),
+      notes: z.string().trim().max(500).optional(),
+      components: z.array(monetaryComponentSchema).min(1).max(12),
+    }),
+  ),
+  async (c) => {
+    const u = c.get("sessionUser");
+    try {
+      return c.json(
+        await new InvestmentRepository(c.env.DB).correctPriorLiability(
           u.businessId,
           u.id,
           c.req.valid("json"),

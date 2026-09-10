@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
-import { CircleDollarSign, Minus, Plus, UserPlus, X } from "lucide-react";
+import {
+  CircleDollarSign,
+  Minus,
+  Plus,
+  ReceiptText,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { api } from "../api";
-import type { InvestmentSummary, MoneySettings } from "../types";
+import type {
+  InvestmentSummary,
+  MoneySettings,
+  PriorLiabilitySource,
+  SupplierInvoice,
+} from "../types";
 import { PageSpinner } from "../components/Spinner";
 import {
   FieldDateTimePicker,
@@ -17,7 +29,13 @@ import {
   type PaymentDraft,
 } from "../components/MonetaryComponentsEditor";
 
-type Modal = "investor" | "contribution" | "distribution" | "withdrawal" | null;
+type Modal =
+  | "investor"
+  | "contribution"
+  | "distribution"
+  | "withdrawal"
+  | "liabilityCorrection"
+  | null;
 type Values = {
   name: string;
   investorId: string;
@@ -26,22 +44,32 @@ type Values = {
   entryDate: string;
   notes: string;
   affectsCash: string;
+  sourceInvestmentEntryId: string;
+  supplierInvoiceId: string;
 };
 
 export function InvestmentsPage() {
   const [data, setData] = useState<InvestmentSummary | null>(null);
   const [settings, setSettings] = useState<MoneySettings | null>(null);
+  const [liabilitySources, setLiabilitySources] = useState<
+    PriorLiabilitySource[]
+  >([]);
+  const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
   const [modal, setModal] = useState<Modal>(null);
   const [drafts, setDrafts] = useState<PaymentDraft[]>([]);
   const [error, setError] = useState("");
   const form = useForm<Values>();
   const load = async () => {
-    const [summary, money] = await Promise.all([
+    const [summary, money, sources, invoiceData] = await Promise.all([
       api.investments(),
       api.moneySettings(),
+      api.priorLiabilitySources(),
+      api.supplierInvoices(),
     ]);
     setData(summary);
     setSettings(money);
+    setLiabilitySources(sources.sources);
+    setInvoices(invoiceData.invoices);
   };
   useEffect(() => {
     void load().catch((reason: Error) => setError(reason.message));
@@ -71,6 +99,9 @@ export function InvestmentsPage() {
       entryDate: new Date().toISOString(),
       notes: "",
       affectsCash: summary.totalUnitsMicros ? "yes" : "no",
+      sourceInvestmentEntryId: liabilitySources[0]?.id ?? "",
+      supplierInvoiceId:
+        invoices.find((invoice) => invoice.pendingAmountCents > 0)?.id ?? "",
     });
     setDrafts([newPaymentDraft(moneySettings.baseCurrency)]);
   };
@@ -118,6 +149,23 @@ export function InvestmentsPage() {
             .map((row) => draftToComponent(row, moneySettings))
             .filter((row): row is NonNullable<typeof row> => Boolean(row)),
         });
+      if (modal === "liabilityCorrection") {
+        const source = liabilitySources.find(
+          (row) => row.id === values.sourceInvestmentEntryId,
+        );
+        if (!source) throw new Error("Selecciona el aporte original");
+        await api.correctPriorLiability({
+          investorId: source.investorId,
+          sourceInvestmentEntryId: source.id,
+          supplierInvoiceId: values.supplierInvoiceId,
+          amountCents: Math.round(values.amount * 100),
+          correctionDate: values.entryDate,
+          notes: values.notes || undefined,
+          components: drafts
+            .map((row) => draftToComponent(row, moneySettings))
+            .filter((row): row is NonNullable<typeof row> => Boolean(row)),
+        });
+      }
       setModal(null);
       await load();
     } catch (reason) {
@@ -130,6 +178,12 @@ export function InvestmentsPage() {
     amountCents > 0 && valuationCents > 0
       ? amountCents / (valuationCents + amountCents)
       : 0;
+  const selectedLiabilitySource = liabilitySources.find(
+    (row) => row.id === form.watch("sourceInvestmentEntryId"),
+  );
+  const selectedInvoice = invoices.find(
+    (row) => row.id === form.watch("supplierInvoiceId"),
+  );
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -175,6 +229,18 @@ export function InvestmentsPage() {
           >
             <Minus size={18} />
             Retirar capital
+          </button>
+          <button
+            onClick={() => open("liabilityCorrection")}
+            disabled={
+              !data.totalUnitsMicros ||
+              !liabilitySources.length ||
+              !invoices.some((invoice) => invoice.pendingAmountCents > 0)
+            }
+            className="flex items-center gap-2 rounded-2xl border border-amber-200 bg-white px-4 py-3 font-black text-amber-800 disabled:opacity-40"
+          >
+            <ReceiptText size={18} />
+            Corregir deuda previa
           </button>
         </div>
       </div>
@@ -230,6 +296,10 @@ export function InvestmentsPage() {
                 <b>{format(investor.withdrawnCapitalCents)}</b>
               </div>
               <div>
+                <p className="text-slate-400">Deudas previas corregidas</p>
+                <b>{format(investor.correctedCapitalCents)}</b>
+              </div>
+              <div>
                 <p className="text-slate-400">Ganancias distribuidas</p>
                 <b>{format(investor.distributedCents)}</b>
               </div>
@@ -266,20 +336,26 @@ export function InvestmentsPage() {
                       ? "Aporte"
                       : entry.entryType === "capitalWithdrawal"
                         ? "Retiro de capital"
-                        : "Distribución"}
+                        : entry.entryType === "priorLiabilityCorrection"
+                          ? "Corrección de deuda previa"
+                          : "Distribución"}
                 </td>
                 <td
                   className={
-                    ["profitDistribution", "capitalWithdrawal"].includes(
-                      entry.entryType,
-                    )
+                    [
+                      "profitDistribution",
+                      "capitalWithdrawal",
+                      "priorLiabilityCorrection",
+                    ].includes(entry.entryType)
                       ? "font-black text-red-600"
                       : "font-black text-emerald-700"
                   }
                 >
-                  {["profitDistribution", "capitalWithdrawal"].includes(
-                    entry.entryType,
-                  )
+                  {[
+                    "profitDistribution",
+                    "capitalWithdrawal",
+                    "priorLiabilityCorrection",
+                  ].includes(entry.entryType)
                     ? "−"
                     : "+"}
                   {format(entry.amountCents)}
@@ -315,7 +391,9 @@ export function InvestmentsPage() {
                       ? "Registrar aporte"
                       : modal === "withdrawal"
                         ? "Retirar capital"
-                        : "Distribuir ganancias"}
+                        : modal === "liabilityCorrection"
+                          ? "Corregir aporte por deuda previa"
+                          : "Distribuir ganancias"}
                 </h2>
                 <button type="button" onClick={() => setModal(null)}>
                   <X />
@@ -347,16 +425,59 @@ export function InvestmentsPage() {
                         })}
                       />
                     )}
+                    {modal === "liabilityCorrection" && (
+                      <>
+                        <FieldSelect
+                          label="Aporte original a corregir"
+                          options={liabilitySources.map((row) => ({
+                            value: row.id,
+                            label: `${row.investorName} · ${row.entryType === "openingCapital" ? "Capital inicial" : "Aporte"} · ${format(row.remainingAmountCents)} disponible`,
+                          }))}
+                          register={form.register("sourceInvestmentEntryId", {
+                            required: "Selecciona el aporte original",
+                          })}
+                        />
+                        <FieldSelect
+                          label="Factura pendiente que se pagará"
+                          options={invoices
+                            .filter((invoice) => invoice.pendingAmountCents > 0)
+                            .map((invoice) => ({
+                              value: invoice.id,
+                              label: `${invoice.invoiceNumber} · ${invoice.supplierName} · ${format(invoice.pendingAmountCents)} pendiente`,
+                            }))}
+                          register={form.register("supplierInvoiceId", {
+                            required: "Selecciona la factura",
+                          })}
+                        />
+                        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-950">
+                          El pago saldrá de la tesorería y cancelará unidades de{" "}
+                          <b>{selectedLiabilitySource?.investorName}</b> al
+                          precio histórico del aporte. No se registrará como
+                          retiro entregado al inversor.
+                        </p>
+                      </>
+                    )}
                     <FieldInput
                       label={
                         modal === "distribution"
                           ? "Ganancia total a distribuir"
                           : modal === "withdrawal"
                             ? "Capital a retirar"
-                            : "Valor del aporte"
+                            : modal === "liabilityCorrection"
+                              ? "Importe de la deuda a corregir"
+                              : "Valor del aporte"
                       }
                       type="number"
                       min="0.01"
+                      max={
+                        modal === "liabilityCorrection"
+                          ? Math.min(
+                              selectedLiabilitySource?.remainingAmountCents ??
+                                0,
+                              selectedInvoice?.pendingAmountCents ?? 0,
+                            ) / 100
+                          : undefined
+                      }
                       register={form.register("amount", {
                         valueAsNumber: true,
                         required: true,
@@ -431,6 +552,7 @@ export function InvestmentsPage() {
                     )}{" "}
                     {(modal === "distribution" ||
                       modal === "withdrawal" ||
+                      modal === "liabilityCorrection" ||
                       form.watch("affectsCash") === "yes") && (
                       <MonetaryComponentsEditor
                         settings={settings}
